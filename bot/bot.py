@@ -20,10 +20,10 @@ class MyBot():
         self.token = os.getenv('token_discord')
     
     def run(self):
-        itents = discord.Intents.default()
-        itents.message_content = True
+        intents = discord.Intents.default()  # Corrigido: era 'itents'
+        intents.message_content = True
         
-        bot = commands.Bot(command_prefix='&', intents=itents)
+        bot = commands.Bot(command_prefix='&', intents=intents)
         
         @bot.event
         async def on_ready():
@@ -44,7 +44,7 @@ class MyBot():
             
             
             if lados_int < 2:
-                await ctx.send('O número de lados deve ser pelo menos 1.')
+                await ctx.send('O número de lados deve ser pelo menos 2.')  # Corrigido: era "pelo menos 1"
                 return
             
             resultado = random.randint(1, lados_int)
@@ -53,19 +53,66 @@ class MyBot():
         
         @bot.command()
         async def add(ctx, url: str):
+            video_id = self.extrair_video_id(url)
+            
+            if not video_id:
+                await ctx.send('URL inválida. Por favor, forneça uma URL válida do YouTube.')
+                return
+            
+            embed_url = f'https://www.youtube.com/watch?v={video_id}'
+            thumbnail_url = f'https://img.youtube.com/vi/{video_id}/hqdefault.jpg'
+            
+            playlist = self.carregar_playlist()
+            
+            if any(item['video_id'] == video_id for item in playlist):
+                await ctx.send('⚠️ Este vídeo já está na playlist.')
+                return
+            
+            registro = {
+                'video_id': video_id,
+                'titulo': None,
+                'embed_url': embed_url,
+                'thumbnail_url': thumbnail_url,
+                'adicionado_por': str(ctx.author),
+                'data_adicionado': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'url': url,
+                'status': 'pendente',
+                'posicao': len(playlist) + 1
+            }
+            
+            playlist.append(registro)
+            self.salvar_playlist(playlist)
+            
+            embed = discord.Embed(title='Vídeo Adicionado à Playlist', color=0x00ff00, url=embed_url)
+            embed.set_thumbnail(url=thumbnail_url)
+            embed.add_field(name="Adicionado por", value=str(ctx.author), inline=True)  # Corrigido: era 'aadd_field' e 'adcionado'
+            
+            await ctx.send(embed=embed)
+            
+            
             
         bot.run(self.token)
 
     def carregar_playlist(self):
-        
-        # se o arquivo nao existir, retorna lista vazia
+        # Se o arquivo não existir, retorna lista vazia
         if not os.path.exists(self.json_playlist):
             return []
     
-        with open(self.json_playlist, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        try:
+            with open(self.json_playlist, 'r', encoding='utf-8') as f:
+                conteudo = f.read().strip()
+                # Se o arquivo está vazio, retorna lista vazia
+                if not conteudo:
+                    return []
+                return json.loads(conteudo)
+        except (json.JSONDecodeError, FileNotFoundError):
+            # Se houver erro no JSON, retorna lista vazia
+            return []
         
     def salvar_playlist(self, playlist):
+        # Cria o diretório se não existir
+        os.makedirs(os.path.dirname(self.json_playlist), exist_ok=True)
+        
         with open(self.json_playlist, 'w', encoding='utf-8') as f:
             json.dump(playlist, f, ensure_ascii=False, indent=2)
     
