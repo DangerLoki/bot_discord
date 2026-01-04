@@ -6,6 +6,8 @@ import json
 import re
 from datetime import datetime
 import random
+import asyncio
+import yt_dlp
 
 class MyBot():
     def __init__(self):
@@ -19,21 +21,28 @@ class MyBot():
         load_dotenv(diretorio_config)
         self.token = os.getenv('token_discord')
     
+    # ===================================================
+    # Função para rodar o bot
+    # ===================================================
+    
     def run(self):
         intents = discord.Intents.default()  # Corrigido: era 'itents'
         intents.message_content = True
         
         bot = commands.Bot(command_prefix='&', intents=intents)
         
+        # evento on_ready
         @bot.event
         async def on_ready():
             print(f'Bot conectado como {bot.user}')
         
+        # comando anjo
         @bot.command()
         async def anjo(ctx):
             await ctx.send('Namoral anjo brocha, conhece esse ritual aqui?',
                            file= self.arquivo_fox)
         
+        # comando para lançar dado
         @bot.command()
         async def dado(ctx, lados: str = "20"):
             
@@ -51,10 +60,71 @@ class MyBot():
             
             await ctx.send(f'🎲 {ctx.author.mention} lançou um dado de {lados_int} lados e o resultado foi {resultado}')
         
+        # comando para adicionar vídeo à playlist
         @bot.command()
-        async def add(ctx, url: str):
-            video_id = self.extrair_video_id(url)
+        async def add(ctx, *, entrada: str):
+            video_id = self.extrair_video_id(entrada)
             
+            if entrada.startswith('http'):
+                await self.adicionar_por_url(ctx, entrada)
+            else:
+                await self.adicionar_por_busca(ctx, entrada, bot)
+        
+        bot.run(self.token)
+        
+    # ===================================================
+    # Funções de busca e adição por busca
+    # ===================================================
+        
+    async def adicionar_por_busca(self, ctx, termo, bot):
+        await ctx.send(f'🔍 {ctx.author.mention} Buscando vídeos para "{termo}"...')
+        resultados = await self.buscar_videos_youtube(termo)
+        
+        if not resultados:
+            await ctx.send('❌ Nenhum vídeo encontrado para o termo de busca fornecido.')
+            return
+        
+        emojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣']
+        descricao = ''
+        
+        for i, video in enumerate(resultados):
+            descricao += f"{emojis[i]} **{video['titulo']}**\nCanal: {video['canal']}\nDuração: {video['duracao_formatada']}\n\n"
+        
+        embed = discord.Embed(
+            title="Selecione um vídeo para adicionar à playlist",
+            description=descricao,
+            color=0x00ff00
+        )
+        msg = await ctx.send(embed=embed)
+        
+        for emoji in emojis[:len(resultados)]:
+            await msg.add_reaction(emoji)
+            
+        def check(reaction, user):
+            return( 
+                   user == ctx.author
+                   and reaction.message.id == msg.id
+                   and reaction.emoji in emojis
+                )
+        try:
+            reaction, user = await bot.wait_for('reaction_add', timeout=30.0, check=check)
+        except asyncio.TimeoutError:
+            await msg.edit(content='⏰ Tempo esgotado. Por favor, tente novamente.', embed=None)
+            return
+        
+        indice = emojis.index(reaction.emoji)
+        video = resultados[indice]
+        url = f"https://www.youtube.com/watch?v={video['video_id']}"
+        
+        await self.adicionar_por_url(ctx, url)
+    
+    # ===================================================
+    # Funções de manipulação da playlist
+    # ===================================================    
+        
+    async def adicionar_por_url(self, ctx, url):
+            
+            video_id = self.extrair_video_id(url)
             if not video_id:
                 await ctx.send('URL inválida. Por favor, forneça uma URL válida do YouTube.')
                 return
@@ -68,9 +138,16 @@ class MyBot():
                 await ctx.send('⚠️ Este vídeo já está na playlist.')
                 return
             
+            # Obtém informações do vídeo (agora assíncrono)
+            await ctx.send(f'🔍 {ctx.author.mention} Obtendo informações do vídeo...')
+            info_video = await self.obter_info_video(url)
+            
             registro = {
                 'video_id': video_id,
-                'titulo': None,
+                'titulo': info_video['titulo'] if info_video else None,
+                'duracao': info_video['duracao'] if info_video else None,
+                'duracao_formatada': info_video['duracao_formatada'] if info_video else None,
+                'canal': info_video['canal'] if info_video else None,
                 'embed_url': embed_url,
                 'thumbnail_url': thumbnail_url,
                 'adicionado_por': str(ctx.author),
@@ -83,16 +160,26 @@ class MyBot():
             playlist.append(registro)
             self.salvar_playlist(playlist)
             
-            embed = discord.Embed(title='Vídeo Adicionado à Playlist', color=0x00ff00, url=embed_url)
+            embed = discord.Embed(
+                title=info_video['titulo'] if info_video else 'Vídeo Adicionado à Playlist',
+                color=0x00ff00,
+                url=embed_url
+            )
             embed.set_thumbnail(url=thumbnail_url)
-            embed.add_field(name="Adicionado por", value=str(ctx.author), inline=True)  # Corrigido: era 'aadd_field' e 'adcionado'
+            embed.add_field(name="Adicionado por", value=str(ctx.author), inline=True)
+            if info_video:
+                embed.add_field(name="Canal", value=info_video['canal'], inline=True)
+                embed.add_field(name="Duração", value=info_video['duracao_formatada'], inline=True)
+                embed.add_field(name="Visualizações", value=f"{info_video['views']:,}", inline=True)
+                embed.add_field(name="Posição na Playlist", value=str(registro['posicao']), inline=True)
+            embed.set_footer(text="Vídeo adicionado com sucesso! ✅")
             
             await ctx.send(embed=embed)
-            
-            
-            
-        bot.run(self.token)
 
+    # ===================================================
+    # Função carregar e salvar playlist
+    # ===================================================
+    
     def carregar_playlist(self):
         # Se o arquivo não existir, retorna lista vazia
         if not os.path.exists(self.json_playlist):
@@ -116,6 +203,10 @@ class MyBot():
         with open(self.json_playlist, 'w', encoding='utf-8') as f:
             json.dump(playlist, f, ensure_ascii=False, indent=2)
     
+    # ===================================================
+    # Função obter ID do vídeo
+    # ===================================================
+    
     def extrair_video_id(self, url):
         # Expressão regular para extrair o ID do vídeo do YouTube
         regex = (
@@ -127,9 +218,92 @@ class MyBot():
         match = re.search(regex, url)
         return match.group(1) if match else None
     
+    # ===================================================
+    # Funções de busca no YouTube usando yt-dlp
+    # ===================================================
     
+    async def obter_info_video(self, url):
+        """Obtém informações do vídeo do YouTube usando yt-dlp"""
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False,
+            'noplaylist': True,  # Evita processar playlists
+        }
         
-
+        def _extract():
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    return {
+                        'titulo': info.get('title', 'Título não disponível'),
+                        'duracao': info.get('duration', 0),
+                        'duracao_formatada': self.formatar_duracao(info.get('duration', 0)),
+                        'canal': info.get('uploader', 'Desconhecido'),
+                        'views': info.get('view_count', 0),
+                    }
+            except Exception as e:
+                print(f"Erro ao obter info do vídeo: {e}")
+                return None
+        
+        # Executa em thread separada para não bloquear o event loop
+        return await asyncio.to_thread(_extract)
+    
+    # ===================================================
+    # Função para formatar duração
+    # ===================================================
+    
+    def formatar_duracao(self, segundos):
+        """Converte segundos para formato HH:MM:SS ou MM:SS"""
+        if not segundos:
+            return "00:00"
+        
+        segundos = int(segundos)  # Converte para inteiro
+        
+        horas = segundos // 3600
+        minutos = (segundos % 3600) // 60
+        segs = segundos % 60
+        
+        if horas > 0:
+            return f"{horas:02d}:{minutos:02d}:{segs:02d}"
+        return f"{minutos:02d}:{segs:02d}"
+    
+    # ===================================================
+    # Função para buscar vídeos pelo termo de busca no YouTube
+    # ===================================================
+    
+    async def buscar_videos_youtube(self, termo_busca, max_resultados=5):
+        """Busca vídeos no YouTube usando yt-dlp"""
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,
+            'default_search': 'ytsearch',
+            'noplaylist': True,
+        }
+        
+        def _search():
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    search_query = f"ytsearch{max_resultados}:{termo_busca}"
+                    info = ydl.extract_info(search_query, download=False)
+                    videos = []
+                    for entry in info.get('entries', []):
+                        videos.append({
+                            'video_id': entry.get('id'),
+                            'titulo': entry.get('title'),
+                            'url': entry.get('webpage_url'),
+                            'canal': entry.get('uploader'),
+                            'duracao_formatada': self.formatar_duracao(entry.get('duration'))
+                        })
+                    return videos
+            except Exception as e:
+                print(f"Erro ao buscar vídeos: {e}")
+                return []
+        
+        # Executa em thread separada para não bloquear o event loop
+        return await asyncio.to_thread(_search)
+    
 if __name__ == "__main__":
     bot = MyBot()
     bot.run()
