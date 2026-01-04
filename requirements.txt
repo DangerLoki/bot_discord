@@ -1,0 +1,8 @@
+# Discord
+discord.py>=2.0.0
+
+# Web Server
+Flask>=2.0.0
+
+# Utilitários (opcional)
+python-dotenv>=1.0.0

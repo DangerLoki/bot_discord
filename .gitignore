@@ -1,0 +1,5 @@
+venv/
+data/playlist.json
+__pycache__/
+*.env
+*.json

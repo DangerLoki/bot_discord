@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎵 YouTube Playlist Player</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>🎵 YouTube Playlist</h1>
+            <p class="subtitle">{{ videos|length }} vídeos na fila</p>
+        </header>
+
+        <main class="main-content">
+            <!-- Player Section -->
+            <section class="player-section">
+                <div class="player-container">
+                    {% if videos %}
+                    <iframe 
+                        id="youtube-player"
+                        src="https://www.youtube.com/embed/{{ videos[0].video_id }}?autoplay=1&enablejsapi=1"
+                        frameborder="0"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowfullscreen>
+                    </iframe>
+                    {% else %}
+                    <div class="empty-player">
+                        <p>📭 Nenhum vídeo na playlist</p>
+                        <p>Adicione vídeos pelo Discord usando <code>!add &lt;url&gt;</code></p>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Player Controls -->
+                <div class="player-controls">
+                    <button id="btn-anterior" class="control-btn" title="Anterior">
+                        ⏮️ Anterior
+                    </button>
+                    <button id="btn-proximo" class="control-btn" title="Próximo">
+                        Próximo ⏭️
+                    </button>
+                    <button id="btn-shuffle" class="control-btn" title="Aleatório">
+                        🔀 Aleatório
+                    </button>
+                    <button id="btn-refresh" class="control-btn" title="Atualizar">
+                        🔄 Atualizar
+                    </button>
+                </div>
+            </section>
+
+            <!-- Playlist Section -->
+            <aside class="playlist-section">
+                <h2>📋 Fila de Reprodução</h2>
+                
+                <div class="playlist-container" id="playlist-container">
+                    {% for video in videos %}
+                    <div class="playlist-item {% if loop.first %}active{% endif %}" 
+                         data-video-id="{{ video.video_id }}"
+                         data-index="{{ loop.index0 }}">
+                        <img src="{{ video.thumbnail }}" alt="Thumbnail" class="video-thumbnail">
+                        <div class="video-info">
+                            <p class="video-title">{{ video.titulo or 'Vídeo ' ~ video.video_id[:8] ~ '...' }}</p>
+                            <p class="video-author">Adicionado por: {{ video.adicionado_por or 'Desconhecido' }}</p>
+                        </div>
+                        <button class="remove-btn" data-video-id="{{ video.video_id }}" title="Remover">
+                            ❌
+                        </button>
+                    </div>
+                    {% else %}
+                    <div class="empty-playlist">
+                        <p>A playlist está vazia</p>
+                    </div>
+                    {% endfor %}
+                </div>
+            </aside>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>🤖 Adicione vídeos pelo Discord | Autoplay ativado</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/player.js') }}"></script>
+    
+    <script>
+        // Dados da playlist para o JavaScript
+        const playlistData = {{ videos | tojson | safe if videos else '[]' }};
+    </script>
+</body>
+</html>
