@@ -61,7 +61,7 @@
                     <div class="playlist-item {% if loop.first %}active{% endif %}" 
                          data-video-id="{{ video.video_id }}"
                          data-index="{{ loop.index0 }}">
-                        <img src="{{ video.thumbnail }}" alt="Thumbnail" class="video-thumbnail">
+                        <img src="{{ video.thumbnail_url }}" alt="Thumbnail" class="video-thumbnail">
                         <div class="video-info">
                             <p class="video-title">{{ video.titulo or 'Vídeo ' ~ video.video_id[:8] ~ '...' }}</p>
                             <p class="video-author">Adicionado por: {{ video.adicionado_por or 'Desconhecido' }}</p>

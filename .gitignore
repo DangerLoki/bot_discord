@@ -3,3 +3,5 @@ data/playlist.json
 __pycache__/
 *.env
 *.json
+image.png
+melhorias.txt

@@ -157,9 +157,12 @@ body {
     padding: 10px;
     background: rgba(255, 255, 255, 0.05);
     border-radius: 10px;
-    cursor: pointer;
+    cursor: pointer !important;
     transition: all 0.3s ease;
     border: 2px solid transparent;
+    pointer-events: auto !important;
+    position: relative;
+    z-index: 1;
 }
 
 .playlist-item:hover {
@@ -201,10 +204,13 @@ body {
 .remove-btn {
     background: none;
     border: none;
-    cursor: pointer;
+    cursor: pointer !important;
     opacity: 0.5;
     transition: opacity 0.3s ease;
     font-size: 1rem;
+    pointer-events: auto !important;
+    position: relative;
+    z-index: 2;
 }
 
 .remove-btn:hover {
@@ -305,6 +311,15 @@ body {
     box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
     animation: slideIn 0.3s ease;
     z-index: 1000;
+}
+
+.playlist-item {
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.playlist-item * {
+    pointer-events: auto;
 }
 
 @keyframes slideIn {
