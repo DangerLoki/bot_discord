@@ -79,6 +79,7 @@ class MyBot():
         self.arquivo_fox = discord.File("image/fox.jpg")
         
         self.json_playlist = os.path.join(diretorio_atual, '..', 'data', 'playlist.json')
+        self.cookies_file = os.path.join(diretorio_atual, '..', 'config', 'cookies.txt')  # Adicione isso
         
         load_dotenv(diretorio_config)
         self.token = os.getenv('token_discord')
@@ -103,6 +104,21 @@ class MyBot():
         async def anjo(ctx):
             await ctx.send('Namoral anjo brocha, conhece esse ritual aqui?',
                            file= self.arquivo_fox)
+        
+        
+        @bot.command(name='skip', aliases=['pular', 'next'])
+        async def skip(ctx):
+            await self.pular_video(ctx)
+        
+        @bot.command(name='previous', aliases=['voltar', 'anterior'])
+        async def previous(ctx):
+            await self.voltar_video(ctx)
+        
+        @bot.command(name='remove', aliases=['remover', 'rm', 'delete'])
+        async def remove(ctx, posicao: int = None):
+            """Remove um vídeo da playlist pela posição"""
+            await self.remover_video(ctx, posicao)
+        
         
         # comando para lançar dado
         @bot.command()
@@ -138,8 +154,119 @@ class MyBot():
             view = PaginacaoPlaylist(playlist)
             await ctx.send(embed=view.criar_embed(), view=view)
         
+
+        
         bot.run(self.token)
         
+    async def voltar_video(self, ctx):
+        
+        import aiohttp
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post('http://localhost:5000/api/playlist/previous') as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get('success'):
+                            video = data.get('video', {})
+                            embed = discord.Embed(
+                                title="⏭️ Vídeo Pulado",
+                                description=f"O vídeo [{video.get('titulo', 'Desconhecido')}]({video.get('embed_url', '#')})",
+                                color=0x00ff00
+                            )
+                            embed.set_thumbnail(url=video.get('thumbnail_url', ''))
+                            embed.set_footer(text="O vídeo atual foi pulado com sucesso.")
+                            await ctx.send(embed=embed)
+                        else:
+                            await ctx.send("❌ Não há vídeo para pular na playlist.")
+                    else:
+                        await ctx.send("❌ Falha ao conectar com o servidor de mídia.")
+        except Exception as e:
+            await ctx.send(f"❌ Ocorreu um erro ao tentar pular o vídeo: {e}")
+    
+    async def remover_video(self, ctx, posicao: int = None):
+        """Remove um vídeo da playlist"""
+        import aiohttp
+        
+        if posicao is None:
+            await ctx.send("❌ Use: `&remove <posição>`\nExemplo: `&remove 5`")
+            return
+        
+        playlist = self.carregar_playlist()
+        
+        if not playlist:
+            await ctx.send("⚠️ A playlist está vazia.")
+            return
+        
+        index = posicao - 1
+        
+        if index < 0 or index >= len(playlist):
+            await ctx.send(f"❌ Posição inválida. A playlist tem {len(playlist)} vídeos.")
+            return
+        
+        video = playlist[index]
+        video_id = video.get('video_id')
+        titulo = video.get('titulo', 'Desconhecido')
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.delete(f'http://localhost:5000/api/playlist/remove/{video_id}') as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get('success'):
+                            embed = discord.Embed(
+                                title="🗑️ Vídeo Removido!",
+                                description=f"**{titulo}**",
+                                color=0xff0000
+                            )
+                            embed.set_thumbnail(url=video.get('thumbnail_url', ''))
+                            embed.add_field(name="Canal", value=video.get('canal', 'Desconhecido'), inline=True)
+                            embed.add_field(name="Posição removida", value=str(posicao), inline=True)
+                            
+                            # Mostra o próximo vídeo se removeu o atual
+                            if data.get('removeu_atual') and data.get('proximo_video'):
+                                proximo = data.get('proximo_video')
+                                embed.add_field(
+                                    name="▶️ Tocando agora", 
+                                    value=proximo.get('titulo', 'Desconhecido'), 
+                                    inline=False
+                                )
+                            
+                            embed.set_footer(text=f"Removido por {ctx.author}")
+                            await ctx.send(embed=embed)
+                        else:
+                            await ctx.send(f"⚠️ {data.get('message', 'Erro ao remover.')}")
+                    else:
+                        await ctx.send("❌ Falha ao conectar com o servidor.")
+        except Exception as e:
+            await ctx.send(f"❌ Erro ao remover vídeo: {e}")
+        
+    async def pular_video(self, ctx):
+        
+        import aiohttp
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post('http://localhost:5000/api/playlist/skip') as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get('success'):
+                            video = data.get('video', {})
+                            embed = discord.Embed(
+                                title="⏭️ Vídeo Pulado",
+                                description=f"O vídeo [{video.get('titulo', 'Desconhecido')}]({video.get('embed_url', '#')})",
+                                color=0x00ff00
+                            )
+                            embed.set_thumbnail(url=video.get('thumbnail_url', ''))
+                            embed.set_footer(text="O vídeo atual foi pulado com sucesso.")
+                            await ctx.send(embed=embed)
+                        else:
+                            await ctx.send("❌ Não há vídeo para pular na playlist.")
+                    else:
+                        await ctx.send("❌ Falha ao conectar com o servidor de mídia.")
+        except Exception as e:
+            await ctx.send(f"❌ Ocorreu um erro ao tentar pular o vídeo: {e}")
+                            
     # ===================================================
     # Funções de busca e adição por busca
     # ===================================================
@@ -296,8 +423,25 @@ class MyBot():
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
-            'noplaylist': True,  # Evita processar playlists
+            'noplaylist': True,
+            'ignoreerrors': False,
+            'geo_bypass': True,
+            'geo_bypass_country': 'BR',
+            # Usar cliente Android 
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android_music', 'android', 'ios'],
+                    'skip': ['dash', 'hls'],
+                }
+            },
+            'http_headers': {
+                'User-Agent': 'com.google.android.youtube/17.36.4 (Linux; U; Android 12; BR) gzip',
+            },
         }
+        
+        # Usa cookies se existir
+        if os.path.exists(self.cookies_file):
+            ydl_opts['cookiefile'] = self.cookies_file
         
         def _extract():
             try:
@@ -314,7 +458,6 @@ class MyBot():
                 print(f"Erro ao obter info do vídeo: {e}")
                 return None
         
-        # Executa em thread separada para não bloquear o event loop
         return await asyncio.to_thread(_extract)
     
     # ===================================================
@@ -348,6 +491,10 @@ class MyBot():
             'extract_flat': True,
             'default_search': 'ytsearch',
             'noplaylist': True,
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            },
         }
         
         def _search():

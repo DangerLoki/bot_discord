@@ -87,9 +87,5 @@
 
     <script src="{{ url_for('static', filename='js/player.js') }}"></script>
     
-    <script>
-        // Dados da playlist para o JavaScript
-        const playlistData = {{ videos | tojson | safe if videos else '[]' }};
-    </script>
 </body>
 </html>

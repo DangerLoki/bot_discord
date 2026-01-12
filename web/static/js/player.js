@@ -3,6 +3,7 @@ let currentIndex = 0;
 let isShuffleMode = false;
 let player = null;
 let playlistData = [];
+let ultimoIndexConhecido = 0;  // Adiciona aqui
 
 // Inicialização quando a página carregar
 document.addEventListener('DOMContentLoaded', function() {
@@ -12,10 +13,16 @@ document.addEventListener('DOMContentLoaded', function() {
     loadPlaylist().then(() => {
         setupEventListeners();
         loadYouTubeAPI();
+        
+        // Sincroniza com a API ao iniciar
+        sincronizarComAPI();
     });
     
     // Verifica por novos vídeos a cada 3 segundos
     setupAutoRefresh();
+    
+    // Verifica se alguém pulou pelo Discord a cada 2 segundos
+    setupDiscordSkipListener();
 });
 
 // Carrega a playlist da API
@@ -291,7 +298,11 @@ function playVideo(index) {
         createYouTubePlayer(video.video_id);
     }
     
+    // Atualiza o destaque visual
     updateActiveItem(index);
+    
+    // Informa a API que mudou de vídeo
+    informarVideoAtual(index);
 }
 
 function playNext() {
@@ -311,61 +322,112 @@ function playNext() {
     showNotification(`▶️ Tocando: ${playlistData[currentIndex].titulo}`);
 }
 
-function updateActiveItem(index) {
-    document.querySelectorAll('.playlist-item').forEach(function(item, i) {
-        if (i === index) {
-            item.classList.add('active');
-        } else {
-            item.classList.remove('active');
-        }
-    });
-    
-    const activeItem = document.querySelector('.playlist-item.active');
-    if (activeItem) {
-        activeItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-}
-
-async function removeVideo(videoId) {
+// Remove um vídeo da playlist
+async function removeVideo(videoId, index) {
     try {
         const response = await fetch(`/api/playlist/remove/${videoId}`, {
             method: 'DELETE'
         });
+        const data = await response.json();
         
-        if (response.ok) {
-            // Remove localmente e re-renderiza
-            const indexRemovido = playlistData.findIndex(v => v.video_id === videoId);
-            playlistData = playlistData.filter(v => v.video_id !== videoId);
+        if (data.success) {
+            // Atualiza a playlist local
+            await loadPlaylist();
             
-            // Ajusta o índice atual se necessário
-            if (indexRemovido < currentIndex) {
-                currentIndex--;
-            } else if (indexRemovido === currentIndex && playlistData.length > 0) {
-                if (currentIndex >= playlistData.length) {
-                    currentIndex = 0;
+            if (data.playlist_vazia) {
+                // Playlist ficou vazia
+                currentIndex = 0;
+                ultimoIndexConhecido = 0;
+                if (player && player.stopVideo) {
+                    player.stopVideo();
                 }
-                playVideo(currentIndex);
+                showNotification('🗑️ Playlist vazia!');
+            } else {
+                // Atualiza o índice com o valor da API
+                currentIndex = data.index;
+                ultimoIndexConhecido = data.index;
+                
+                // Se removeu o vídeo que estava tocando, toca o próximo
+                if (data.removeu_atual) {
+                    playVideo(currentIndex);
+                    showNotification('🗑️ Vídeo removido! Tocando próximo...');
+                } else {
+                    // Apenas atualiza o destaque visual
+                    updateActiveItem(currentIndex);
+                    showNotification('🗑️ Vídeo removido!');
+                }
             }
             
             renderPlaylist();
-            showNotification('✅ Vídeo removido da playlist');
         } else {
-            showNotification('❌ Erro ao remover vídeo');
+            showNotification('❌ ' + data.message);
         }
-    } catch (error) {
-        console.error('Erro:', error);
+    } catch (e) {
+        console.error('Erro ao remover vídeo:', e);
         showNotification('❌ Erro ao remover vídeo');
     }
 }
 
-function showNotification(message) {
-    const existing = document.querySelector('.notification');
-    if (existing) existing.remove();
+// Atualiza o item ativo na playlist (destaque visual)
+function updateActiveItem(index) {
+    // Remove destaque de todos
+    document.querySelectorAll('.playlist-item').forEach((item, i) => {
+        item.classList.remove('active', 'playing');
+    });
     
-    const notification = document.createElement('div');
-    notification.className = 'notification';
-    notification.textContent = message;
-    document.body.appendChild(notification);
-    
-    setTimeout(() => notification.remove(), 3000);
+    // Adiciona destaque ao item atual
+    const items = document.querySelectorAll('.playlist-item');
+    if (items[index]) {
+        items[index].classList.add('active', 'playing');
+    }
+}
+
+// Verifica se alguém pulou pelo Discord
+function setupDiscordSkipListener() {
+    setInterval(async () => {
+        try {
+            const response = await fetch('/api/playlist/atual');
+            const data = await response.json();
+            
+            if (data.success && data.index !== ultimoIndexConhecido) {
+                console.log('Mudança detectada! De', ultimoIndexConhecido, 'para', data.index);
+                ultimoIndexConhecido = data.index;
+                currentIndex = data.index;
+                
+                // Atualiza o player e o destaque
+                playVideo(data.index);
+                updateActiveItem(data.index);
+                showNotification('⏭️ Vídeo alterado pelo Discord!');
+            }
+        } catch (e) {
+            console.error('Erro ao verificar vídeo atual:', e);
+        }
+    }, 2000);
+}
+
+// Sincroniza o índice local com a API
+async function sincronizarComAPI() {
+    try {
+        const response = await fetch('/api/playlist/atual');
+        const data = await response.json();
+        
+        if (data.success) {
+            ultimoIndexConhecido = data.index;
+            currentIndex = data.index;
+            console.log('Sincronizado com API, índice:', data.index);
+        }
+    } catch (e) {
+        console.error('Erro ao sincronizar com API:', e);
+    }
+}
+
+// Informa a API quando muda de vídeo localmente
+async function informarVideoAtual(index) {
+    try {
+        await fetch(`/api/playlist/set/${index}`, { method: 'POST' });
+        ultimoIndexConhecido = index;
+        console.log('API informada, novo índice:', index);
+    } catch (e) {
+        console.error('Erro ao informar API:', e);
+    }
 }
