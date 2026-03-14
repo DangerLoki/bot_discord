@@ -99,12 +99,6 @@ class MyBot():
         async def on_ready():
             print(f'Bot conectado como {bot.user}')
         
-        # comando anjo
-        @bot.command()
-        async def anjo(ctx):
-            await ctx.send('Namoral anjo brocha, conhece esse ritual aqui?',
-                           file= self.arquivo_fox)
-        
         
         @bot.command(name='skip', aliases=['pular', 'next'])
         async def skip(ctx):

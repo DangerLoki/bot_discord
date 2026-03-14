@@ -1,101 +1,81 @@
-# 🎵 YouTube Playlist Bot
+# Discord Bot + Web Player
 
-Bot do Discord que captura links do YouTube e exibe em um site com autoplay.
+Projeto em desenvolvimento voltado à automação de captura de links do YouTube enviados no Discord, com organização da fila e reprodução em uma interface web local.
 
-## 📁 Estrutura do Projeto
+## Resumo
 
-```
-nightbot discord/
-├── config/
-│   ├── __init__.py
-│   └── settings.py          # Configurações globais
-├── models/
-│   ├── __init__.py
-│   ├── video.py              # Modelo de vídeo
-│   └── playlist.py           # Gerenciador da playlist
+A aplicação integra um bot do Discord com um player web local para centralizar vídeos compartilhados em servidores e evitar controle manual de playlists no chat.
+
+## Principais funcionalidades
+
+- Captura de links do YouTube enviados no Discord
+- Adição manual de vídeos por comando
+- Listagem e remoção de itens da playlist
+- Limpeza completa da fila
+- Persistência local dos dados em JSON
+- Interface web para reprodução e navegação entre vídeos
+
+## Stack
+
+- Python
+- discord.py
+- Flask
+- HTML, CSS e JavaScript
+- JSON
+
+## Habilidades demonstradas
+
+- Integração com API
+- Automação com Python
+- Execução concorrente com `threading`
+- Fluxo assíncrono com `asyncio`
+- Organização modular de código
+- Manipulação de arquivos JSON
+- Separação entre backend e interface web
+- Estruturação de aplicação para evolução futura
+
+## Estrutura do projeto
+
+```bash
+bot_discord/
 ├── bot/
-│   ├── __init__.py
-│   ├── discord_bot.py        # Bot do Discord
-│   └── youtube_extractor.py  # Extrator de URLs
 ├── web/
-│   ├── __init__.py
-│   ├── app.py                # Aplicação Flask
-│   ├── templates/
-│   │   └── player.html       # Template do player
-│   └── static/
-│       ├── css/
-│       │   └── style.css     # Estilos
-│       └── js/
-│           └── player.js     # JavaScript do player
-├── data/
-│   └── playlist.json         # Dados persistentes
-├── main.py                   # Ponto de entrada
-├── requirements.txt          # Dependências
+├── main.py
+├── playlist.json
+├── requirements.txt
 └── README.md
+````
+
+## Como executar
+
+```bash
+git clone <URL_DO_REPOSITORIO>
+cd bot_discord
+python -m venv .venv
+source .venv/bin/activate  # Linux
+pip install -r requirements.txt
+python main.py
 ```
 
-## 🚀 Instalação
+No Windows:
 
-1. **Clone ou baixe o projeto**
-
-2. **Crie um ambiente virtual (opcional mas recomendado)**
-   ```bash
-   python -m venv venv
-   venv\Scripts\activate  # Windows
-   ```
-
-3. **Instale as dependências**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Configure o token do Discord**
-   
-   Edite o arquivo `config/settings.py` e substitua:
-   ```python
-   DISCORD_TOKEN = "SEU_TOKEN_AQUI"
-   ```
-
-5. **Execute o bot**
-   ```bash
-   python main.py
-   ```
-
-## 🎮 Comandos do Discord
-
-| Comando | Descrição |
-|---------|-----------|
-| `!add <url>` | Adiciona um vídeo à playlist |
-| `!playlist` | Mostra os vídeos na fila |
-| `!remove <id>` | Remove um vídeo |
-| `!limpar` | Limpa toda a playlist |
-| `!site` | Mostra o link do player |
-| `!ajuda` | Lista todos os comandos |
-
-### Captura Automática
-Envie qualquer link do YouTube no chat e ele será adicionado automaticamente!
-
-## 🌐 Player Web
-
-Acesse `http://localhost:5000` para ver o player.
-
-### Funcionalidades:
-- ▶️ Autoplay automático
-- ⏭️ Próximo/Anterior
-- 🔀 Modo aleatório
-- 🔄 Atualização automática
-- 📱 Design responsivo
-
-## ⚙️ Configurações
-
-Edite `config/settings.py` para personalizar:
-
-```python
-DISCORD_PREFIX = "!"           # Prefixo dos comandos
-WEB_PORT = 5000                # Porta do servidor web
-MAX_VIDEOS_PLAYLIST = 100      # Máximo de vídeos
+```bash
+.venv\Scripts\activate
 ```
 
-## 📝 Licença
+## Arquitetura resumida
 
-MIT License
+1. O usuário envia um link ou comando no Discord
+2. O bot processa a entrada e atualiza a playlist
+3. Os dados são persistidos localmente
+4. A aplicação web lê a playlist e exibe os vídeos no navegador
+
+## Status
+
+**Projeto em desenvolvimento**
+
+O projeto já possui base funcional, mas ainda está em evolução. Melhorias previstas incluem uso de variáveis de ambiente, tratamento de erros, testes automatizados, banco de dados e containerização.
+
+## Objetivo no portfólio
+
+Este projeto faz parte do meu portfólio para demonstrar competências em automação, integração com API, backend em Python e organização de aplicações modulares.
