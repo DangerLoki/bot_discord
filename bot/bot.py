@@ -75,7 +75,7 @@ class MyBot():
     def __init__(self):
         
         diretorio_atual = os.path.dirname(__file__)
-        diretorio_config = os.path.join(diretorio_atual, '..', 'config', 'config.env')
+        diretorio_config = os.path.join(diretorio_atual, '..', 'config.env')
         self.arquivo_fox = discord.File("image/fox.jpg")
         
         self.json_playlist = os.path.join(diretorio_atual, '..', 'data', 'playlist.json')
