@@ -94,7 +94,7 @@ function renderPlaylist() {
         removeBtn.setAttribute('data-video-id', video.video_id);
         removeBtn.textContent = '✕';
 
-        // Botão promover (apenas se não for o atual nem o próximo)
+        // Botão promover (apenas se não for o atual)
         const promoteBtn = document.createElement('button');
         promoteBtn.className = 'promote-btn';
         promoteBtn.setAttribute('data-video-id', video.video_id);
@@ -413,7 +413,28 @@ async function removeVideo(videoId, index) {
         showNotification('❌ Erro ao remover vídeo');
     }
 }
-
+// Promove um vídeo para ser o próximo a tocar
+async function promoteVideo(videoId) {
+    try {
+        const response = await fetch(`/api/playlist/promote/${videoId}`, { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            // Atualiza os índices ANTES de recarregar para o poller não disparar um falso skip
+            if (typeof data.current_index === 'number') {
+                currentIndex = data.current_index;
+                ultimoIndexConhecido = data.current_index;
+            }
+            await loadPlaylist();
+            updateActiveItem(currentIndex);
+            showNotification(`\u23ed\ufe0f Próximo: ${playlistData.find(v => v.video_id === videoId)?.titulo || 'Vídeo'}`);
+        } else {
+            showNotification('\u274c ' + data.message);
+        }
+    } catch (e) {
+        console.error('Erro ao promover vídeo:', e);
+        showNotification('\u274c Erro ao promover vídeo');
+    }
+}
 // Atualiza o item ativo na playlist (destaque visual)
 function updateActiveItem(index) {
     // Remove destaque de todos

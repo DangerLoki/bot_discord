@@ -1,9 +1,8 @@
 import logging
 import os
+from src.logger import get_logger
 
-# Silencia logs do werkzeug (servidor Flask)
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.ERROR)
+logger = get_logger(__name__)
 
 from flask import Flask, render_template, jsonify, request
 import json
@@ -12,7 +11,7 @@ import os
 app = Flask(__name__)
 
 # Caminho para o arquivo da playlist
-PLAYLIST_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'playlist.json')
+PLAYLIST_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'playlist.json')
 
 # Índice do vídeo atual (variável global)
 video_atual_index = 0
@@ -86,6 +85,8 @@ def remover_video(video_id):
     
     salvar_playlist(playlist)
     
+    logger.info(f'[REMOVE] vídeo {video_id} removido — {len(playlist)} restantes')
+
     # Ajusta o índice atual
     if len(playlist) == 0:
         video_atual_index = 0
@@ -177,6 +178,8 @@ def proximo_video():
     if video_atual_index >= len(playlist):
         video_atual_index = 0
     
+    logger.info(f'[SKIP] → índice {video_atual_index}: {playlist[video_atual_index].get("titulo", "?")}')
+
     return jsonify({
         'success': True, 
         'video': playlist[video_atual_index],
@@ -206,6 +209,64 @@ def video_anterior():
         'video': playlist[video_atual_index],
         'index': video_atual_index,
         'total': len(playlist)
+    })
+
+@app.route('/api/playlist/clear', methods=['DELETE'])
+def limpar_playlist():
+    """Remove todos os vídeos da playlist"""
+    global video_atual_index
+    salvar_playlist([])
+    video_atual_index = 0
+    logger.info('[CLEAR] Playlist limpa via interface web')
+    return jsonify({'success': True, 'message': 'Playlist limpa com sucesso'})
+
+@app.route('/api/playlist/promote/<video_id>', methods=['POST'])
+def promover_video(video_id):
+    """Move um vídeo para ser o próximo a tocar"""
+    global video_atual_index
+    playlist = carregar_playlist()
+
+    if not playlist:
+        return jsonify({'success': False, 'message': 'Playlist vazia'})
+
+    index_video = next((i for i, v in enumerate(playlist) if v.get('video_id') == video_id), None)
+
+    if index_video is None:
+        return jsonify({'success': False, 'message': 'Vídeo não encontrado'})
+
+    if index_video == video_atual_index:
+        return jsonify({'success': False, 'message': 'Este vídeo já está tocando'})
+
+    next_index = video_atual_index + 1
+
+    # Já é o próximo
+    if index_video == next_index:
+        return jsonify({'success': True, 'message': 'Vídeo já é o próximo', 'video': playlist[index_video], 'current_index': video_atual_index})
+
+    # Remove da posição atual
+    video = playlist.pop(index_video)
+
+    # Ajusta o índice atual se o vídeo estava antes dele
+    if index_video < video_atual_index:
+        video_atual_index -= 1
+
+    # Insere logo após o atual
+    next_pos = video_atual_index + 1
+    playlist.insert(next_pos, video)
+
+    # Atualiza posições
+    for i, v in enumerate(playlist):
+        v['posicao'] = i + 1
+
+    salvar_playlist(playlist)
+    logger.info(f'[PROMOTE] {video_id} ("{video.get("titulo", "?")}") movido para posição {next_pos + 1}')
+
+    return jsonify({
+        'success': True,
+        'message': f'Vídeo promovido para a próxima posição!',
+        'video': video,
+        'nova_posicao': next_pos + 1,
+        'current_index': video_atual_index
     })
 
 # ===================================================

@@ -9,6 +9,9 @@ from datetime import datetime
 import random
 import asyncio
 import yt_dlp
+from src.logger import get_logger
+
+logger = get_logger(__name__)
 
 class PaginacaoPlaylist(View):
     def __init__(self, playlist, itens_por_pagina=10, timeout=60):
@@ -75,11 +78,10 @@ class MyBot():
     def __init__(self):
         
         diretorio_atual = os.path.dirname(__file__)
-        diretorio_config = os.path.join(diretorio_atual, '..', 'config.env')
-        self.arquivo_fox = discord.File("image/fox.jpg")
+        diretorio_config = os.path.join(diretorio_atual, '..', '..', 'config.env')
         
-        self.json_playlist = os.path.join(diretorio_atual, '..', 'data', 'playlist.json')
-        self.cookies_file = os.path.join(diretorio_atual, '..', 'config', 'cookies.txt')  # Adicione isso
+        self.json_playlist = os.path.join(diretorio_atual, '..', '..', 'data', 'playlist.json')
+        self.cookies_file = os.path.join(diretorio_atual, '..', '..', 'config', 'cookies.txt')
         
         load_dotenv(diretorio_config)
         self.token = os.getenv('token_discord')
@@ -97,22 +99,37 @@ class MyBot():
         # evento on_ready
         @bot.event
         async def on_ready():
-            print(f'Bot conectado como {bot.user}')
+            logger.info(f'Bot conectado como {bot.user} (ID: {bot.user.id})')
         
         
         @bot.command(name='skip', aliases=['pular', 'next'])
         async def skip(ctx):
+            logger.info(f'[SKIP] solicitado por {ctx.author} em #{ctx.channel}')
             await self.pular_video(ctx)
         
         @bot.command(name='previous', aliases=['voltar', 'anterior'])
         async def previous(ctx):
+            logger.info(f'[PREVIOUS] solicitado por {ctx.author} em #{ctx.channel}')
             await self.voltar_video(ctx)
         
-        @bot.command(name='remove', aliases=['remover', 'rm', 'delete'])
-        async def remove(ctx, posicao: int = None):
-            """Remove um vídeo da playlist pela posição"""
-            await self.remover_video(ctx, posicao)
-        
+        @bot.command(name='remove', aliases=['remover', 'rm', 'delete', 'rmid', 'deleteid', 'removeid'])
+        async def remove(ctx, *, entrada: str = None):
+            """Remove um vídeo da playlist pela posição ou pelo ID/URL"""
+            logger.info(f'[REMOVE] entrada="{entrada}" solicitado por {ctx.author} em #{ctx.channel}')
+            await self.remover_video(ctx, entrada)
+
+        @bot.command(name='promover', aliases=['promote', 'proxima', 'boost'])
+        async def promover(ctx, *, entrada: str = None):
+            """Move um vídeo para ser o próximo a tocar"""
+            logger.info(f'[PROMOTE] entrada="{entrada}" solicitado por {ctx.author} em #{ctx.channel}')
+            await self.promover_video(ctx, entrada)
+
+        @bot.command(name='limpar', aliases=['clear', 'clearall', 'limpartudo'])
+        async def limpar(ctx):
+            """Limpa toda a playlist"""
+            logger.info(f'[CLEAR] solicitado por {ctx.author} em #{ctx.channel}')
+            await self.limpar_playlist(ctx)
+
         
         # comando para lançar dado
         @bot.command()
@@ -135,12 +152,24 @@ class MyBot():
         # comando para adicionar vídeo à playlist
         @bot.command()
         async def add(ctx, *, entrada: str):
-            video_id = self.extrair_video_id(entrada)
-            
-            if entrada.startswith('http'):
+            if entrada.startswith('http') and ('list=' in entrada or 'playlist' in entrada):
+                logger.info(f'[ADD PLAYLIST] {entrada} por {ctx.author}')
+                await self.adicionar_playlist(ctx, entrada)
+            elif entrada.startswith('http'):
+                logger.info(f'[ADD URL] {entrada} por {ctx.author}')
                 await self.adicionar_por_url(ctx, entrada)
             else:
+                logger.info(f'[ADD BUSCA] "{entrada}" por {ctx.author}')
                 await self.adicionar_por_busca(ctx, entrada, bot)
+
+        @bot.command(name='playlist', aliases=['pl', 'addplaylist'])
+        async def playlist_cmd(ctx, *, url: str):
+            """Adiciona uma playlist inteira do YouTube"""
+            if not url.startswith('http') or ('list=' not in url and 'playlist' not in url):
+                await ctx.send('❌ Forneça uma URL de playlist do YouTube. Exemplo: `&playlist https://www.youtube.com/playlist?list=XXXX`')
+                return
+            logger.info(f'[ADD PLAYLIST] {url} por {ctx.author}')
+            await self.adicionar_playlist(ctx, url)
         
         @bot.command()
         async def listar(ctx):
@@ -178,30 +207,43 @@ class MyBot():
         except Exception as e:
             await ctx.send(f"❌ Ocorreu um erro ao tentar pular o vídeo: {e}")
     
-    async def remover_video(self, ctx, posicao: int = None):
-        """Remove um vídeo da playlist"""
+    async def remover_video(self, ctx, entrada: str = None):
+        """Remove um vídeo da playlist por posição, ID ou URL"""
         import aiohttp
-        
-        if posicao is None:
-            await ctx.send("❌ Use: `&remove <posição>`\nExemplo: `&remove 5`")
+
+        if not entrada:
+            await ctx.send("❌ Use: `&remove <posição>` ou `&remove <video_id>`\nExemplos: `&remove 5` | `&remove dQw4w9WgXcQ`")
             return
-        
+
         playlist = self.carregar_playlist()
-        
         if not playlist:
             await ctx.send("⚠️ A playlist está vazia.")
             return
-        
-        index = posicao - 1
-        
-        if index < 0 or index >= len(playlist):
-            await ctx.send(f"❌ Posição inválida. A playlist tem {len(playlist)} vídeos.")
-            return
-        
-        video = playlist[index]
+
+        video = None
+        posicao_label = None
+
+        # Tenta interpretar como número de posição
+        if entrada.isdigit():
+            posicao = int(entrada)
+            index = posicao - 1
+            if index < 0 or index >= len(playlist):
+                await ctx.send(f"❌ Posição inválida. A playlist tem {len(playlist)} vídeos.")
+                return
+            video = playlist[index]
+            posicao_label = str(posicao)
+        else:
+            # Tenta extrair ID de URL ou usar diretamente como ID
+            video_id = self.extrair_video_id(entrada) or entrada.strip()
+            video = next((v for v in playlist if v.get('video_id') == video_id), None)
+            if not video:
+                await ctx.send(f"❌ Não encontrei nenhum vídeo com ID `{video_id}` na playlist.")
+                return
+            posicao_label = str(video.get('posicao', '?'))
+
         video_id = video.get('video_id')
         titulo = video.get('titulo', 'Desconhecido')
-        
+
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.delete(f'http://localhost:5000/api/playlist/remove/{video_id}') as resp:
@@ -214,18 +256,16 @@ class MyBot():
                                 color=0xff0000
                             )
                             embed.set_thumbnail(url=video.get('thumbnail_url', ''))
+                            embed.add_field(name="Posição", value=posicao_label, inline=True)
+                            embed.add_field(name="ID", value=f"`{video_id}`", inline=True)
                             embed.add_field(name="Canal", value=video.get('canal', 'Desconhecido'), inline=True)
-                            embed.add_field(name="Posição removida", value=str(posicao), inline=True)
-                            
-                            # Mostra o próximo vídeo se removeu o atual
                             if data.get('removeu_atual') and data.get('proximo_video'):
                                 proximo = data.get('proximo_video')
                                 embed.add_field(
-                                    name="▶️ Tocando agora", 
-                                    value=proximo.get('titulo', 'Desconhecido'), 
+                                    name="▶️ Tocando agora",
+                                    value=proximo.get('titulo', 'Desconhecido'),
                                     inline=False
                                 )
-                            
                             embed.set_footer(text=f"Removido por {ctx.author}")
                             await ctx.send(embed=embed)
                         else:
@@ -233,8 +273,90 @@ class MyBot():
                     else:
                         await ctx.send("❌ Falha ao conectar com o servidor.")
         except Exception as e:
+            logger.error(f'Erro ao remover vídeo: {e}', exc_info=True)
             await ctx.send(f"❌ Erro ao remover vídeo: {e}")
-        
+    async def promover_video(self, ctx, entrada: str = None):
+        """Move um vídeo para ser o próximo a tocar"""
+        import aiohttp
+
+        if not entrada:
+            await ctx.send("\u274c Use: `&promover <posição>` ou `&promover <video_id>`\nExemplos: `&promover 6` | `&promover dQw4w9WgXcQ`")
+            return
+
+        playlist = self.carregar_playlist()
+        if not playlist:
+            await ctx.send("\u26a0\ufe0f A playlist está vazia.")
+            return
+
+        video = None
+        if entrada.isdigit():
+            posicao = int(entrada)
+            index = posicao - 1
+            if index < 0 or index >= len(playlist):
+                await ctx.send(f"\u274c Posição inválida. A playlist tem {len(playlist)} vídeos.")
+                return
+            video = playlist[index]
+        else:
+            video_id = self.extrair_video_id(entrada) or entrada.strip()
+            video = next((v for v in playlist if v.get('video_id') == video_id), None)
+            if not video:
+                await ctx.send(f"\u274c Não encontrei nenhum vídeo com ID `{video_id}` na playlist.")
+                return
+
+        video_id = video.get('video_id')
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(f'http://localhost:5000/api/playlist/promote/{video_id}') as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get('success'):
+                            embed = discord.Embed(
+                                title="\u23ed\ufe0f Vídeo Promovido!",
+                                description=f"**{video.get('titulo', video_id)}** será o próximo a tocar.",
+                                color=0xfeca57
+                            )
+                            embed.set_thumbnail(url=video.get('thumbnail_url', ''))
+                            embed.add_field(name="Nova Posição", value=str(data.get('nova_posicao', '?')), inline=True)
+                            embed.add_field(name="Canal", value=video.get('canal', 'Desconhecido'), inline=True)
+                            embed.set_footer(text=f"Promovido por {ctx.author}")
+                            await ctx.send(embed=embed)
+                        else:
+                            await ctx.send(f"\u26a0\ufe0f {data.get('message', 'Erro ao promover.')}")
+                    else:
+                        await ctx.send("\u274c Falha ao conectar com o servidor.")
+        except Exception as e:
+            logger.error(f'Erro ao promover vídeo: {e}', exc_info=True)
+            await ctx.send(f"\u274c Erro ao promover vídeo: {e}")
+    async def limpar_playlist(self, ctx):
+        """Limpa toda a playlist via API"""
+        import aiohttp
+
+        playlist = self.carregar_playlist()
+        if not playlist:
+            await ctx.send("⚠️ A playlist já está vazia.")
+            return
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.delete('http://localhost:5000/api/playlist/clear') as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get('success'):
+                            embed = discord.Embed(
+                                title="🗑️ Playlist Limpa!",
+                                description=f"**{len(playlist)}** vídeo(s) removido(s).",
+                                color=0xff0000
+                            )
+                            embed.set_footer(text=f"Limpa por {ctx.author}")
+                            await ctx.send(embed=embed)
+                        else:
+                            await ctx.send(f"⚠️ {data.get('message', 'Erro ao limpar.')}")
+                    else:
+                        await ctx.send("❌ Falha ao conectar com o servidor.")
+        except Exception as e:
+            logger.error(f'Erro ao limpar playlist: {e}', exc_info=True)
+            await ctx.send(f"❌ Erro ao limpar playlist: {e}")
     async def pular_video(self, ctx):
         
         import aiohttp
@@ -348,6 +470,7 @@ class MyBot():
             
             playlist.append(registro)
             self.salvar_playlist(playlist)
+            logger.info(f'[ADD] "{registro["titulo"]}" ({video_id}) por {ctx.author} — pos {registro["posicao"]}')
             
             embed = discord.Embed(
                 title=info_video['titulo'] if info_video else 'Vídeo Adicionado à Playlist',
@@ -408,6 +531,137 @@ class MyBot():
         return match.group(1) if match else None
     
     # ===================================================
+    # Funções de playlist inteira
+    # ===================================================
+
+    async def obter_videos_playlist(self, url, mix_limit=50):
+        """Extrai todos os vídeos de uma playlist do YouTube usando yt-dlp (modo flat, sem baixar).
+        YouTube Mix (list=RD...) são playlists dinâmicas/infinitas: usa URL original com v= e limita entradas.
+        """
+        import urllib.parse
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        playlist_id = params['list'][0] if 'list' in params else None
+
+        # Mix do YouTube têm ID de playlist com prefixo "RD" (Radio/Mix automático)
+        is_mix = bool(playlist_id and playlist_id.startswith('RD'))
+
+        if is_mix:
+            # Precisa da URL com v= para semear o mix;
+            # playlistend evita paginação infinita
+            extract_url = url
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': True,
+                'ignoreerrors': True,
+                'playlistend': mix_limit,
+            }
+            logger.debug(f'Extraindo YouTube Mix (limite {mix_limit}): {extract_url}')
+        else:
+            # Playlist normal: converte para URL canônica sem v=
+            extract_url = f'https://www.youtube.com/playlist?list={playlist_id}' if playlist_id else url
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': 'in_playlist',
+                'ignoreerrors': True,
+            }
+            logger.debug(f'Extraindo playlist: {extract_url}')
+
+        if os.path.exists(self.cookies_file):
+            ydl_opts['cookiefile'] = self.cookies_file
+
+        def _extract():
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(extract_url, download=False)
+                    if not info:
+                        return None, [], is_mix
+                    # Se retornou um vídeo único no lugar de playlist
+                    if info.get('_type') == 'video' or 'entries' not in info:
+                        logger.warning('yt-dlp retornou vídeo único, esperava playlist')
+                        return None, [], is_mix
+                    titulo_pl = info.get('title') or ('YouTube Mix' if is_mix else 'Playlist')
+                    entries = list(info.get('entries', []))
+                    videos = []
+                    for entry in entries:
+                        if not entry or not entry.get('id'):
+                            continue
+                        vid_id = entry.get('id')
+                        videos.append({
+                            'video_id': vid_id,
+                            'titulo': entry.get('title') or f'Vídeo {vid_id[:8]}',
+                            'duracao': entry.get('duration') or 0,
+                            'duracao_formatada': self.formatar_duracao(entry.get('duration') or 0),
+                            'canal': entry.get('uploader') or entry.get('channel') or 'Desconhecido',
+                            'embed_url': f'https://www.youtube.com/watch?v={vid_id}',
+                            'thumbnail_url': f'https://img.youtube.com/vi/{vid_id}/hqdefault.jpg',
+                        })
+                    logger.info(f'["{titulo_pl}"] {len(videos)} vídeos extraídos (mix={is_mix})')
+                    return titulo_pl, videos, is_mix
+            except Exception as e:
+                logger.error(f'Erro ao extrair playlist: {e}', exc_info=True)
+                return None, [], is_mix
+
+        return await asyncio.to_thread(_extract)
+
+    async def adicionar_playlist(self, ctx, url):
+        """Adiciona todos os vídeos de uma playlist à fila"""
+        msg = await ctx.send(f'🔍 {ctx.author.mention} Carregando playlist, aguarde...')
+
+        titulo_pl, videos, is_mix = await self.obter_videos_playlist(url)
+
+        if not videos:
+            await msg.edit(content='❌ Nenhum vídeo encontrado na playlist. Verifique se a URL é válida e se a playlist é pública.')
+            return
+
+        playlist = self.carregar_playlist()
+        ids_existentes = {v['video_id'] for v in playlist}
+
+        adicionados = 0
+        duplicados = 0
+
+        tipo_icone = '🎲' if is_mix else '📋'
+        await msg.edit(content=f'{tipo_icone} **{titulo_pl}** — {len(videos)} vídeos encontrados. Adicionando...')
+
+        for video in videos:
+            if video['video_id'] in ids_existentes:
+                duplicados += 1
+                continue
+
+            registro = {
+                'video_id': video['video_id'],
+                'titulo': video['titulo'],
+                'duracao': video['duracao'],
+                'duracao_formatada': video['duracao_formatada'],
+                'canal': video['canal'],
+                'embed_url': video['embed_url'],
+                'thumbnail_url': video['thumbnail_url'],
+                'adicionado_por': str(ctx.author),
+                'data_adicionado': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'url': video['embed_url'],
+                'status': 'pendente',
+                'posicao': len(playlist) + 1,
+            }
+            playlist.append(registro)
+            ids_existentes.add(video['video_id'])
+            adicionados += 1
+
+        self.salvar_playlist(playlist)
+
+        embed = discord.Embed(
+            title=f'{tipo_icone} {titulo_pl}',
+            color=0x00ff00,
+            url=url
+        )
+        embed.add_field(name='✅ Adicionados', value=str(adicionados), inline=True)
+        embed.add_field(name='⚠️ Já na fila', value=str(duplicados), inline=True)
+        embed.add_field(name='📊 Total na fila', value=str(len(playlist)), inline=True)
+        embed.set_footer(text=f'Adicionado por {ctx.author}')
+        await msg.edit(content=None, embed=embed)
+
+    # ===================================================
     # Funções de busca no YouTube usando yt-dlp
     # ===================================================
     
@@ -449,7 +703,7 @@ class MyBot():
                         'views': info.get('view_count', 0),
                     }
             except Exception as e:
-                print(f"Erro ao obter info do vídeo: {e}")
+                logger.error(f'Erro ao obter info do vídeo: {e}', exc_info=True)
                 return None
         
         return await asyncio.to_thread(_extract)
@@ -507,7 +761,7 @@ class MyBot():
                         })
                     return videos
             except Exception as e:
-                print(f"Erro ao buscar vídeos: {e}")
+                logger.error(f'Erro ao buscar vídeos: {e}', exc_info=True)
                 return []
         
         # Executa em thread separada para não bloquear o event loop
