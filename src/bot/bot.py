@@ -9,9 +9,29 @@ from datetime import datetime
 import random
 import asyncio
 import yt_dlp
+from pathlib import Path
 from src.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+class GeoBlockedError(Exception):
+    """Levantado quando um vídeo está bloqueado por geo-restrição."""
+    pass
+
+
+_GEO_KEYWORDS = [
+    'not made this video available in your country',
+    'this video is not available in your country',
+    'blocked it in your country',
+    'geo restricted',
+]
+
+
+def _is_geo_blocked(msg: str) -> bool:
+    m = msg.lower()
+    return any(kw in m for kw in _GEO_KEYWORDS)
+
 
 class PaginacaoPlaylist(View):
     def __init__(self, playlist, itens_por_pagina=10, timeout=60):
@@ -82,9 +102,23 @@ class MyBot():
         
         self.json_playlist = os.path.join(diretorio_atual, '..', '..', 'data', 'playlist.json')
         self.cookies_file = os.path.join(diretorio_atual, '..', '..', 'config', 'cookies.txt')
+        self.cache_dir = Path(diretorio_atual) / '..' / '..' / 'cache'
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         load_dotenv(diretorio_config)
         self.token = os.getenv('token_discord')
+        self.proxy = os.getenv('ytdlp_proxy', '').strip() or None
+        if self.proxy:
+            logger.info(f'[PROXY] usando proxy para yt-dlp: {self.proxy}')
+        
+        # Voice playback state
+        self.voice_client = None
+        self.voice_volume = 0.25
+        self.is_playing_voice = False
+        self.voice_bot = None  # referência ao bot para usar no after callback
+        self.playlist_index = 0  # índice do vídeo atual na playlist
+        self.shuffle_mode = False   # modo aleatório ON/OFF
+        self._carregando = asyncio.Lock()  # lock contra chamadas concorrentes de tocar_atual
     
     # ===================================================
     # Função para rodar o bot
@@ -94,7 +128,7 @@ class MyBot():
         intents = discord.Intents.default()  # Corrigido: era 'itents'
         intents.message_content = True
         
-        bot = commands.Bot(command_prefix='&', intents=intents)
+        bot = commands.Bot(command_prefix='&', intents=intents, help_command=None)
         
         # evento on_ready
         @bot.event
@@ -106,11 +140,37 @@ class MyBot():
         async def skip(ctx):
             logger.info(f'[SKIP] solicitado por {ctx.author} em #{ctx.channel}')
             await self.pular_video(ctx)
+            # Se está na call, toca o próximo
+            if self.voice_client and self.voice_client.is_connected():
+                await self.tocar_atual(ctx)
         
         @bot.command(name='previous', aliases=['voltar', 'anterior'])
         async def previous(ctx):
             logger.info(f'[PREVIOUS] solicitado por {ctx.author} em #{ctx.channel}')
             await self.voltar_video(ctx)
+            # Se está na call, toca o anterior
+            if self.voice_client and self.voice_client.is_connected():
+                await self.tocar_atual(ctx)
+
+        @bot.command(name='recomecar', aliases=['restart', 'replay', 'reiniciar'])
+        async def recomecar(ctx):
+            """Recomeça a música atual do início"""
+            logger.info(f'[RECOMECAR] solicitado por {ctx.author} em #{ctx.channel}')
+            if not self.voice_client or not self.voice_client.is_connected():
+                await ctx.send('❌ Não estou em nenhum canal de voz.')
+                return
+            await ctx.send('🔁 Recomeçando música atual...')
+            await self.tocar_atual(ctx)
+
+        @bot.command(name='aleatorio', aliases=['shuffle', 'random', 'embaralhar'])
+        async def aleatorio(ctx):
+            """Liga/desliga o modo de reprodução aleatória"""
+            self.shuffle_mode = not self.shuffle_mode
+            if self.shuffle_mode:
+                await ctx.send('🔀 Modo aleatório **ativado**! Músicas sem repetição até completar a playlist.')
+            else:
+                await ctx.send('➡️ Modo aleatório **desativado**. Ordem normal retomada.')
+            logger.info(f'[SHUFFLE] {"ON" if self.shuffle_mode else "OFF"} por {ctx.author}')
         
         @bot.command(name='remove', aliases=['remover', 'rm', 'delete', 'rmid', 'deleteid', 'removeid'])
         async def remove(ctx, *, entrada: str = None):
@@ -177,39 +237,408 @@ class MyBot():
             view = PaginacaoPlaylist(playlist)
             await ctx.send(embed=view.criar_embed(), view=view)
         
+        # ==============================================
+        # Comandos de voz
+        # ==============================================
 
-        
+        @bot.command(name='entrar', aliases=['join', 'connect', 'entra'])
+        async def entrar(ctx):
+            """Bot entra no canal de voz do usuário"""
+            if not ctx.author.voice:
+                await ctx.send('❌ Você precisa estar em um canal de voz!')
+                return
+            
+            canal = ctx.author.voice.channel
+            
+            if self.voice_client and self.voice_client.is_connected():
+                if self.voice_client.channel == canal:
+                    await ctx.send('⚠️ Já estou nesse canal!')
+                    return
+                await self.voice_client.move_to(canal)
+                await ctx.send(f'🔄 Me movi para **{canal.name}**.')
+                return
+            
+            self.voice_client = await canal.connect()
+            self.voice_bot = bot
+            await ctx.send(f'✅ Entrei em **{canal.name}**! Use `&tocar` para iniciar o áudio.')
+            logger.info(f'[VOZ] Bot entrou em: {canal.name}')
+
+        @bot.command(name='tocar', aliases=['play', 'start'])
+        async def tocar(ctx):
+            """Começa a tocar o áudio da playlist na call"""
+            if not self.voice_client or not self.voice_client.is_connected():
+                # Auto-join se o user está em um canal
+                if ctx.author.voice:
+                    self.voice_client = await ctx.author.voice.channel.connect()
+                    self.voice_bot = bot
+                else:
+                    await ctx.send('❌ Não estou em nenhum canal! Use `&entrar` primeiro.')
+                    return
+            
+            await self.tocar_atual(ctx)
+
+        @bot.command(name='pausar', aliases=['pause'])
+        async def pausar(ctx):
+            """Pausa o áudio"""
+            if self.voice_client and self.voice_client.is_playing():
+                self.voice_client.pause()
+                await ctx.send('⏸️ Áudio pausado.')
+            else:
+                await ctx.send('❌ Nenhum áudio tocando.')
+
+        @bot.command(name='retomar', aliases=['resume', 'continuar'])
+        async def retomar(ctx):
+            """Retoma o áudio pausado"""
+            if self.voice_client and self.voice_client.is_paused():
+                self.voice_client.resume()
+                await ctx.send('▶️ Áudio retomado.')
+            else:
+                await ctx.send('❌ Nenhum áudio pausado.')
+
+        @bot.command(name='parar', aliases=['stop'])
+        async def parar(ctx):
+            """Para o áudio sem sair da call"""
+            if self.voice_client and (self.voice_client.is_playing() or self.voice_client.is_paused()):
+                self.is_playing_voice = False
+                self.voice_client.stop()
+                await ctx.send('⏹️ Áudio parado.')
+            else:
+                await ctx.send('❌ Nenhum áudio tocando.')
+
+        @bot.command(name='sair', aliases=['leave', 'disconnect', 'dc'])
+        async def sair(ctx):
+            """Para o áudio e sai da call"""
+            if self.voice_client:
+                self.is_playing_voice = False
+                self.voice_client.stop()
+                await self.voice_client.disconnect()
+                self.voice_client = None
+                await ctx.send('📴 Saí da call.')
+                logger.info('[VOZ] Bot saiu da call.')
+            else:
+                await ctx.send('❌ Não estou em nenhum canal.')
+
+        @bot.command(name='volume', aliases=['vol', 'v'])
+        async def volume(ctx, valor: str = None):
+            """Ajusta o volume (0 a 200)"""
+            if valor is None:
+                porcentagem = int(self.voice_volume * 100)
+                await ctx.send(f'🔉 Volume atual: **{porcentagem}%**')
+                return
+            
+            try:
+                valor_num = int(valor)
+            except ValueError:
+                await ctx.send('❌ Use um número entre 0 e 200. Ex: `&volume 80`')
+                return
+            
+            if not 0 <= valor_num <= 200:
+                await ctx.send('❌ Volume deve ser entre **0** e **200**.')
+                return
+            
+            self.voice_volume = valor_num / 100.0
+            
+            # Atualiza volume ao vivo se estiver tocando
+            if self.voice_client and self.voice_client.source:
+                self.voice_client.source.volume = self.voice_volume
+            
+            await ctx.send(f'🔉 Volume ajustado para **{valor_num}%**.')
+
+        @bot.command(name='tocando', aliases=['np', 'nowplaying', 'atual'])
+        async def tocando(ctx):
+            """Mostra o que está tocando na call"""
+            if not self.voice_client or not self.voice_client.is_connected():
+                await ctx.send('❌ Não estou em nenhum canal.')
+                return
+            
+            if not self.voice_client.is_playing() and not self.voice_client.is_paused():
+                await ctx.send('❌ Nenhum áudio tocando no momento.')
+                return
+            
+            playlist = self.carregar_playlist()
+            if not playlist:
+                await ctx.send('❌ Playlist vazia.')
+                return
+            
+            index = self.playlist_index if self.playlist_index < len(playlist) else 0
+            video = playlist[index]
+            status = '⏸️ Pausado' if self.voice_client.is_paused() else '▶️ Tocando'
+            embed = discord.Embed(
+                title=f'{status} na Call',
+                description=f"**[{video.get('titulo', 'Desconhecido')}]({video.get('embed_url', '#')})**",
+                color=0x1DB954
+            )
+            embed.set_thumbnail(url=video.get('thumbnail_url', ''))
+            embed.add_field(name='Duração', value=video.get('duracao_formatada', '??:??'), inline=True)
+            embed.add_field(name='Posição', value=f"{index + 1}/{len(playlist)}", inline=True)
+            embed.add_field(name='Volume', value=f'{int(self.voice_volume * 100)}%', inline=True)
+            embed.add_field(name='Canal', value=video.get('canal', 'Desconhecido'), inline=True)
+            await ctx.send(embed=embed)
+
+        @bot.command(name='help', aliases=['ajuda', 'comandos', 'cmds'])
+        async def help_cmd(ctx):
+            """Lista todos os comandos disponíveis"""
+            embed = discord.Embed(
+                title='📖 Comandos do Bot',
+                description='Prefixo: `&`',
+                color=0x5865F2
+            )
+
+            embed.add_field(
+                name='🎵 Playlist',
+                value=(
+                    '`&add <url|busca>` — Adiciona vídeo ou playlist\n'
+                    '`&playlist <url>` — Adiciona playlist inteira\n'
+                    '`&listar` — Lista os vídeos (paginado)\n'
+                    '`&remove <pos|id>` — Remove um vídeo\n'
+                    '`&promover <pos|id>` — Move para próxima posição\n'
+                    '`&limpar` — Limpa toda a playlist'
+                ),
+                inline=False
+            )
+
+            embed.add_field(
+                name='🔊 Reprodução de Voz',
+                value=(
+                    '`&entrar` — Entra no seu canal de voz\n'
+                    '`&tocar` — Inicia a reprodução\n'
+                    '`&pausar` — Pausa o áudio\n'
+                    '`&retomar` — Retoma o áudio pausado\n'
+                    '`&parar` — Para sem sair da call\n'
+                    '`&sair` — Para e sai da call\n'
+                    '`&skip` — Pula para o próximo\n'
+                    '`&previous` — Volta ao anterior\n'
+                    '`&recomecar` — Recomeça a música atual\n'
+                    '`&aleatorio` — Liga/desliga modo aleatório 🔀\n'
+                    '`&volume <0‑200>` — Ajusta o volume\n'
+                    '`&tocando` — Mostra o que está tocando'
+                ),
+                inline=False
+            )
+
+            embed.add_field(
+                name='🎲 Diversão',
+                value='`&dado [lados]` — Lança um dado (padrão: d20)',
+                inline=False
+            )
+
+            embed.set_footer(text=f'Solicitado por {ctx.author}', icon_url=ctx.author.display_avatar.url)
+            await ctx.send(embed=embed)
+
         bot.run(self.token)
+    
+    # ===================================================
+    # Métodos de reprodução de áudio na call
+    # ===================================================
+
+    async def baixar_audio(self, video_url, video_id):
+        """Baixa o áudio do vídeo para o cache e retorna o caminho do arquivo.
+        Lança GeoBlockedError se o vídeo estiver bloqueado na região.
+        """
+        destino = self.cache_dir / video_id
+        existente = list(self.cache_dir.glob(f'{video_id}.*'))
+        if existente:
+            logger.debug(f'[CACHE] usando arquivo em cache: {existente[0]}')
+            return str(existente[0])
+
+        opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': str(destino) + '.%(ext)s',
+            'quiet': True,
+            'no_warnings': True,
+            'noplaylist': True,
+            'js_runtimes': {'node': {}},
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'opus',
+                'preferredquality': '0',
+            }],
+        }
+
+        if os.path.exists(self.cookies_file):
+            opts['cookiefile'] = self.cookies_file
+        if self.proxy:
+            opts['proxy'] = self.proxy
+
+        def _download():
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    ydl.download([video_url])
+                resultado = list(self.cache_dir.glob(f'{video_id}.*'))
+                return str(resultado[0]) if resultado else None
+            except Exception as e:
+                if _is_geo_blocked(str(e)):
+                    raise GeoBlockedError(str(e))
+                logger.error(f'[yt-dlp] erro ao baixar {video_url}: {e}')
+                return None
+
+        return await asyncio.to_thread(_download)
+
+    def _limpar_cache(self, video_id):
+        """Remove o arquivo de áudio do cache após tocar."""
+        for f in self.cache_dir.glob(f'{video_id}.*'):
+            try:
+                f.unlink()
+                logger.debug(f'[CACHE] removido: {f}')
+            except Exception as e:
+                logger.warning(f'[CACHE] falha ao remover {f}: {e}')
+
+    def _proximo_aleatorio(self, playlist: list) -> int:
+        """Retorna índice aleatório de um vídeo não tocado.
+        Quando todos já foram tocados, reseta as flags e começa novo ciclo.
+        """
+        nao_tocados = [
+            i for i, v in enumerate(playlist)
+            if not v.get('tocado', False) and i != self.playlist_index
+        ]
+        if not nao_tocados:
+            # Todos tocados — reset e começa novo ciclo
+            for v in playlist:
+                v['tocado'] = False
+            self.salvar_playlist(playlist)
+            nao_tocados = [i for i in range(len(playlist)) if i != self.playlist_index]
+        if not nao_tocados:
+            return self.playlist_index  # playlist com 1 único vídeo
+        return random.choice(nao_tocados)
+    
+    async def tocar_atual(self, ctx):
+        """Toca o vídeo atual da playlist na call"""
+        if self._carregando.locked():
+            return
+        async with self._carregando:
+            await self._tocar_atual_impl(ctx)
+
+    async def _tocar_atual_impl(self, ctx):
+        if not self.voice_client or not self.voice_client.is_connected():
+            await ctx.send('❌ Não estou em nenhum canal de voz!')
+            return
         
-    async def voltar_video(self, ctx):
-        
-        import aiohttp
+        # Para qualquer áudio atual sem disparar _auto_next
+        if self.voice_client.is_playing() or self.voice_client.is_paused():
+            self.is_playing_voice = False
+            self.voice_client.stop()
+
+        # Loop para pular automaticamente vídeos que falham na extração
+        while True:
+            playlist = self.carregar_playlist()
+            if not playlist:
+                await ctx.send('❌ Playlist vazia. Adicione vídeos com `&add`.')
+                return
+            
+            if self.playlist_index >= len(playlist):
+                self.playlist_index = 0
+            
+            video = playlist[self.playlist_index]
+            total = len(playlist)
+            titulo = video.get('titulo', 'Desconhecido')
+            video_url = video.get('embed_url', '')
+
+            await ctx.send(f'🔄 Baixando áudio de **{titulo}**...')
+
+            video_id = video.get('video_id', '')
+
+            # Marca o vídeo como tocado na playlist
+            playlist[self.playlist_index]['tocado'] = True
+            self.salvar_playlist(playlist)
+
+            try:
+                audio_path = await self.baixar_audio(video_url, video_id)
+            except GeoBlockedError:
+                await ctx.send(
+                    f'🌍 **{titulo}** está bloqueado na sua região e foi removido da playlist.'
+                )
+                playlist = self.carregar_playlist()
+                playlist = [v for v in playlist if v.get('video_id') != video_id]
+                for i, v in enumerate(playlist):
+                    v['posicao'] = i + 1
+                self.salvar_playlist(playlist)
+                if not playlist:
+                    await ctx.send('📋 Playlist vazia após remoção.')
+                    return
+                self.playlist_index = self.playlist_index % len(playlist)
+                continue
+
+            if not audio_path:
+                await ctx.send(f'❌ Não consegui baixar o áudio de **{titulo}**. Pulando...')
+                self.playlist_index = (self.playlist_index + 1) % len(playlist)
+                continue
+            break
         
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post('http://localhost:5000/api/playlist/previous') as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if data.get('success'):
-                            video = data.get('video', {})
-                            embed = discord.Embed(
-                                title="⏭️ Vídeo Pulado",
-                                description=f"O vídeo [{video.get('titulo', 'Desconhecido')}]({video.get('embed_url', '#')})",
-                                color=0x00ff00
-                            )
-                            embed.set_thumbnail(url=video.get('thumbnail_url', ''))
-                            embed.set_footer(text="O vídeo atual foi pulado com sucesso.")
-                            await ctx.send(embed=embed)
-                        else:
-                            await ctx.send("❌ Não há vídeo para pular na playlist.")
-                    else:
-                        await ctx.send("❌ Falha ao conectar com o servidor de mídia.")
+            source = discord.FFmpegPCMAudio(audio_path)
+            source = discord.PCMVolumeTransformer(source, volume=self.voice_volume)
         except Exception as e:
-            await ctx.send(f"❌ Ocorreu um erro ao tentar pular o vídeo: {e}")
+            await ctx.send(f'❌ Erro ao criar stream de áudio: {e}')
+            return
+        
+        self.is_playing_voice = True
+        video_id_atual = video.get('video_id', '')
+        
+        def after_playing(error):
+            if error:
+                logger.error(f'Erro no player: {error}')
+            self._limpar_cache(video_id_atual)
+            if self.is_playing_voice and self.voice_client and self.voice_client.is_connected():
+                asyncio.run_coroutine_threadsafe(
+                    self._auto_next(ctx), self.voice_bot.loop
+                )
+        
+        self.voice_client.play(source, after=after_playing)
+        
+        embed = discord.Embed(
+            title='🔊 Tocando na Call',
+            description=f"**[{titulo}]({video_url})**",
+            color=0x1DB954
+        )
+        embed.set_thumbnail(url=video.get('thumbnail_url', ''))
+        embed.add_field(name='Duração', value=video.get('duracao_formatada', '??:??'), inline=True)
+        embed.add_field(name='Posição', value=f"{self.playlist_index + 1}/{total}", inline=True)
+        embed.add_field(name='Volume', value=f'{int(self.voice_volume * 100)}%', inline=True)
+        await ctx.send(embed=embed)
+        logger.info(f'[VOZ] Tocando: {titulo}')
+    
+    async def _auto_next(self, ctx):
+        """Avança automaticamente para o próximo vídeo"""
+        if not self.is_playing_voice:
+            return
+
+        playlist = self.carregar_playlist()
+        if not playlist:
+            self.is_playing_voice = False
+            await ctx.send('📋 Playlist terminou!')
+            return
+
+        if self.shuffle_mode:
+            self.playlist_index = self._proximo_aleatorio(playlist)
+        else:
+            self.playlist_index += 1
+            if self.playlist_index >= len(playlist):
+                self.playlist_index = 0
+                self.is_playing_voice = False
+                await ctx.send('📋 Playlist terminou! Use `&tocar` para recomeçar.')
+                return
+
+        await self.tocar_atual(ctx)
+
+    async def voltar_video(self, ctx):
+        playlist = self.carregar_playlist()
+        if not playlist:
+            await ctx.send('❌ Playlist vazia.')
+            return
+        
+        self.playlist_index = (self.playlist_index - 1) % len(playlist)
+        video = playlist[self.playlist_index]
+        embed = discord.Embed(
+            title="⏮️ Vídeo Anterior",
+            description=f"Anterior: [{video.get('titulo', 'Desconhecido')}]({video.get('embed_url', '#')})",
+            color=0x00ff00
+        )
+        embed.set_thumbnail(url=video.get('thumbnail_url', ''))
+        embed.set_footer(text="Voltado ao vídeo anterior.")
+        await ctx.send(embed=embed)
     
     async def remover_video(self, ctx, entrada: str = None):
         """Remove um vídeo da playlist por posição, ID ou URL"""
-        import aiohttp
 
         if not entrada:
             await ctx.send("❌ Use: `&remove <posição>` ou `&remove <video_id>`\nExemplos: `&remove 5` | `&remove dQw4w9WgXcQ`")
@@ -244,40 +673,48 @@ class MyBot():
         video_id = video.get('video_id')
         titulo = video.get('titulo', 'Desconhecido')
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.delete(f'http://localhost:5000/api/playlist/remove/{video_id}') as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if data.get('success'):
-                            embed = discord.Embed(
-                                title="🗑️ Vídeo Removido!",
-                                description=f"**{titulo}**",
-                                color=0xff0000
-                            )
-                            embed.set_thumbnail(url=video.get('thumbnail_url', ''))
-                            embed.add_field(name="Posição", value=posicao_label, inline=True)
-                            embed.add_field(name="ID", value=f"`{video_id}`", inline=True)
-                            embed.add_field(name="Canal", value=video.get('canal', 'Desconhecido'), inline=True)
-                            if data.get('removeu_atual') and data.get('proximo_video'):
-                                proximo = data.get('proximo_video')
-                                embed.add_field(
-                                    name="▶️ Tocando agora",
-                                    value=proximo.get('titulo', 'Desconhecido'),
-                                    inline=False
-                                )
-                            embed.set_footer(text=f"Removido por {ctx.author}")
-                            await ctx.send(embed=embed)
-                        else:
-                            await ctx.send(f"⚠️ {data.get('message', 'Erro ao remover.')}")
-                    else:
-                        await ctx.send("❌ Falha ao conectar com o servidor.")
-        except Exception as e:
-            logger.error(f'Erro ao remover vídeo: {e}', exc_info=True)
-            await ctx.send(f"❌ Erro ao remover vídeo: {e}")
+        # Encontra o índice real no array
+        index_removido = next((i for i, v in enumerate(playlist) if v.get('video_id') == video_id), None)
+        if index_removido is None:
+            await ctx.send(f"❌ Erro interno: vídeo não encontrado.")
+            return
+
+        removendo_atual = (index_removido == self.playlist_index)
+        playlist.pop(index_removido)
+
+        for i, v in enumerate(playlist):
+            v['posicao'] = i + 1
+
+        self.salvar_playlist(playlist)
+
+        # Ajusta o índice atual
+        if len(playlist) == 0:
+            self.playlist_index = 0
+        elif index_removido < self.playlist_index:
+            self.playlist_index -= 1
+        elif removendo_atual and self.playlist_index >= len(playlist):
+            self.playlist_index = 0
+
+        embed = discord.Embed(
+            title="🗑️ Vídeo Removido!",
+            description=f"**{titulo}**",
+            color=0xff0000
+        )
+        embed.set_thumbnail(url=video.get('thumbnail_url', ''))
+        embed.add_field(name="Posição", value=posicao_label, inline=True)
+        embed.add_field(name="ID", value=f"`{video_id}`", inline=True)
+        embed.add_field(name="Canal", value=video.get('canal', 'Desconhecido'), inline=True)
+        if removendo_atual and playlist:
+            proximo = playlist[self.playlist_index]
+            embed.add_field(
+                name="▶️ Tocando agora",
+                value=proximo.get('titulo', 'Desconhecido'),
+                inline=False
+            )
+        embed.set_footer(text=f"Removido por {ctx.author}")
+        await ctx.send(embed=embed)
     async def promover_video(self, ctx, entrada: str = None):
         """Move um vídeo para ser o próximo a tocar"""
-        import aiohttp
 
         if not entrada:
             await ctx.send("\u274c Use: `&promover <posição>` ou `&promover <video_id>`\nExemplos: `&promover 6` | `&promover dQw4w9WgXcQ`")
@@ -305,83 +742,96 @@ class MyBot():
 
         video_id = video.get('video_id')
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(f'http://localhost:5000/api/playlist/promote/{video_id}') as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if data.get('success'):
-                            embed = discord.Embed(
-                                title="\u23ed\ufe0f Vídeo Promovido!",
-                                description=f"**{video.get('titulo', video_id)}** será o próximo a tocar.",
-                                color=0xfeca57
-                            )
-                            embed.set_thumbnail(url=video.get('thumbnail_url', ''))
-                            embed.add_field(name="Nova Posição", value=str(data.get('nova_posicao', '?')), inline=True)
-                            embed.add_field(name="Canal", value=video.get('canal', 'Desconhecido'), inline=True)
-                            embed.set_footer(text=f"Promovido por {ctx.author}")
-                            await ctx.send(embed=embed)
-                        else:
-                            await ctx.send(f"\u26a0\ufe0f {data.get('message', 'Erro ao promover.')}")
-                    else:
-                        await ctx.send("\u274c Falha ao conectar com o servidor.")
-        except Exception as e:
-            logger.error(f'Erro ao promover vídeo: {e}', exc_info=True)
-            await ctx.send(f"\u274c Erro ao promover vídeo: {e}")
+        index_video = next((i for i, v in enumerate(playlist) if v.get('video_id') == video_id), None)
+        if index_video is None:
+            await ctx.send("❌ Erro interno: vídeo não encontrado.")
+            return
+
+        if index_video == self.playlist_index:
+            await ctx.send("⚠️ Este vídeo já está tocando.")
+            return
+
+        next_index = (self.playlist_index + 1) % len(playlist)
+        if index_video == next_index:
+            nova_posicao = next_index + 1
+            embed = discord.Embed(
+                title="⏭️ Vídeo Promovido!",
+                description=f"**{video.get('titulo', video_id)}** será o próximo a tocar.",
+                color=0xfeca57
+            )
+            embed.set_thumbnail(url=video.get('thumbnail_url', ''))
+            embed.add_field(name="Nova Posição", value=str(nova_posicao), inline=True)
+            embed.add_field(name="Canal", value=video.get('canal', 'Desconhecido'), inline=True)
+            embed.set_footer(text=f"Promovido por {ctx.author}")
+            await ctx.send(embed=embed)
+            return
+
+        # Remove da posição atual
+        playlist.pop(index_video)
+        if index_video < self.playlist_index:
+            self.playlist_index -= 1
+
+        # Insere logo após o atual
+        next_pos = self.playlist_index + 1
+        playlist.insert(next_pos, video)
+
+        for i, v in enumerate(playlist):
+            v['posicao'] = i + 1
+
+        self.salvar_playlist(playlist)
+        logger.info(f'[PROMOTE] {video_id} ("{video.get("titulo", "?")}") movido para posição {next_pos + 1}')
+
+        embed = discord.Embed(
+            title="⏭️ Vídeo Promovido!",
+            description=f"**{video.get('titulo', video_id)}** será o próximo a tocar.",
+            color=0xfeca57
+        )
+        embed.set_thumbnail(url=video.get('thumbnail_url', ''))
+        embed.add_field(name="Nova Posição", value=str(next_pos + 1), inline=True)
+        embed.add_field(name="Canal", value=video.get('canal', 'Desconhecido'), inline=True)
+        embed.set_footer(text=f"Promovido por {ctx.author}")
+        await ctx.send(embed=embed)
     async def limpar_playlist(self, ctx):
-        """Limpa toda a playlist via API"""
-        import aiohttp
+        """Limpa toda a playlist"""
 
         playlist = self.carregar_playlist()
         if not playlist:
             await ctx.send("⚠️ A playlist já está vazia.")
             return
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.delete('http://localhost:5000/api/playlist/clear') as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if data.get('success'):
-                            embed = discord.Embed(
-                                title="🗑️ Playlist Limpa!",
-                                description=f"**{len(playlist)}** vídeo(s) removido(s).",
-                                color=0xff0000
-                            )
-                            embed.set_footer(text=f"Limpa por {ctx.author}")
-                            await ctx.send(embed=embed)
-                        else:
-                            await ctx.send(f"⚠️ {data.get('message', 'Erro ao limpar.')}")
-                    else:
-                        await ctx.send("❌ Falha ao conectar com o servidor.")
-        except Exception as e:
-            logger.error(f'Erro ao limpar playlist: {e}', exc_info=True)
-            await ctx.send(f"❌ Erro ao limpar playlist: {e}")
+        total = len(playlist)
+        self.salvar_playlist([])
+        self.playlist_index = 0
+        logger.info(f'[CLEAR] Playlist limpa por {ctx.author}')
+        embed = discord.Embed(
+            title="🗑️ Playlist Limpa!",
+            description=f"**{total}** vídeo(s) removido(s).",
+            color=0xff0000
+        )
+        embed.set_footer(text=f"Limpa por {ctx.author}")
+        await ctx.send(embed=embed)
     async def pular_video(self, ctx):
-        
-        import aiohttp
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post('http://localhost:5000/api/playlist/skip') as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if data.get('success'):
-                            video = data.get('video', {})
-                            embed = discord.Embed(
-                                title="⏭️ Vídeo Pulado",
-                                description=f"O vídeo [{video.get('titulo', 'Desconhecido')}]({video.get('embed_url', '#')})",
-                                color=0x00ff00
-                            )
-                            embed.set_thumbnail(url=video.get('thumbnail_url', ''))
-                            embed.set_footer(text="O vídeo atual foi pulado com sucesso.")
-                            await ctx.send(embed=embed)
-                        else:
-                            await ctx.send("❌ Não há vídeo para pular na playlist.")
-                    else:
-                        await ctx.send("❌ Falha ao conectar com o servidor de mídia.")
-        except Exception as e:
-            await ctx.send(f"❌ Ocorreu um erro ao tentar pular o vídeo: {e}")
+        playlist = self.carregar_playlist()
+        if not playlist:
+            await ctx.send('❌ Playlist vazia.')
+            return
+
+        if self.shuffle_mode:
+            self.playlist_index = self._proximo_aleatorio(playlist)
+            label = '🔀 Pulado (aleatório)'
+        else:
+            self.playlist_index = (self.playlist_index + 1) % len(playlist)
+            label = '⏭️ Vídeo Pulado'
+
+        video = playlist[self.playlist_index]
+        embed = discord.Embed(
+            title=label,
+            description=f"Próximo: [{video.get('titulo', 'Desconhecido')}]({video.get('embed_url', '#')})",
+            color=0x00ff00
+        )
+        embed.set_thumbnail(url=video.get('thumbnail_url', ''))
+        embed.set_footer(text='O vídeo foi pulado com sucesso.')
+        await ctx.send(embed=embed)
                             
     # ===================================================
     # Funções de busca e adição por busca
@@ -449,10 +899,16 @@ class MyBot():
                 await ctx.send('⚠️ Este vídeo já está na playlist.')
                 return
             
-            # Obtém informações do vídeo (agora assíncrono)
+            # Obtém informações do vídeo
             await ctx.send(f'🔍 {ctx.author.mention} Obtendo informações do vídeo...')
             info_video = await self.obter_info_video(url)
-            
+
+            if info_video and info_video.get('geo_blocked'):
+                await ctx.send(
+                    f'🌍 Este vídeo está bloqueado na sua região e não pode ser adicionado à playlist.'
+                )
+                return
+
             registro = {
                 'video_id': video_id,
                 'titulo': info_video['titulo'] if info_video else None,
@@ -465,7 +921,8 @@ class MyBot():
                 'data_adicionado': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'url': url,
                 'status': 'pendente',
-                'posicao': len(playlist) + 1
+                'posicao': len(playlist) + 1,
+                'tocado': False,
             }
             
             playlist.append(registro)
@@ -643,6 +1100,7 @@ class MyBot():
                 'url': video['embed_url'],
                 'status': 'pendente',
                 'posicao': len(playlist) + 1,
+                'tocado': False,
             }
             playlist.append(registro)
             ids_existentes.add(video['video_id'])
@@ -672,25 +1130,14 @@ class MyBot():
             'no_warnings': True,
             'extract_flat': False,
             'noplaylist': True,
-            'ignoreerrors': False,
-            'geo_bypass': True,
-            'geo_bypass_country': 'BR',
-            # Usar cliente Android 
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android_music', 'android', 'ios'],
-                    'skip': ['dash', 'hls'],
-                }
-            },
-            'http_headers': {
-                'User-Agent': 'com.google.android.youtube/17.36.4 (Linux; U; Android 12; BR) gzip',
-            },
+            'js_runtimes': {'node': {}},
         }
-        
-        # Usa cookies se existir
+
         if os.path.exists(self.cookies_file):
             ydl_opts['cookiefile'] = self.cookies_file
-        
+        if self.proxy:
+            ydl_opts['proxy'] = self.proxy
+
         def _extract():
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -703,9 +1150,11 @@ class MyBot():
                         'views': info.get('view_count', 0),
                     }
             except Exception as e:
+                if _is_geo_blocked(str(e)):
+                    return {'geo_blocked': True}
                 logger.error(f'Erro ao obter info do vídeo: {e}', exc_info=True)
                 return None
-        
+
         return await asyncio.to_thread(_extract)
     
     # ===================================================
