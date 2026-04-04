@@ -1,81 +1,142 @@
-# Discord Bot + Web Player
+# Loki Bot — Discord Music Bot
 
-Projeto em desenvolvimento voltado à automação de captura de links do YouTube enviados no Discord, com organização da fila e reprodução em uma interface web local.
+Bot do Discord para reprodução de áudio do YouTube diretamente em canais de voz, com gerenciamento de playlist persistente, modo aleatório e suporte a proxy.
 
-## Resumo
+## Funcionalidades
 
-A aplicação integra um bot do Discord com um player web local para centralizar vídeos compartilhados em servidores e evitar controle manual de playlists no chat.
-
-## Principais funcionalidades
-
-- Captura de links do YouTube enviados no Discord
-- Adição manual de vídeos por comando
-- Listagem e remoção de itens da playlist
-- Limpeza completa da fila
-- Persistência local dos dados em JSON
-- Interface web para reprodução e navegação entre vídeos
+- Reprodução de áudio do YouTube em canais de voz via `yt-dlp` + FFmpeg
+- Adição de vídeos por URL, ID ou termo de busca
+- Importação de playlists e YouTube Mix completos
+- Gerenciamento de fila: remover, promover, limpar, paginar
+- Modo aleatório (`&aleatorio`) com flag de "já tocado" para evitar repetições no ciclo
+- Recomeçar música do início (`&recomecar`)
+- Controle de volume em tempo real
+- Detecção automática de geo-bloqueio com remoção da playlist
+- Cache local de áudio com limpeza automática após reprodução
+- Suporte a proxy (`ytdlp_proxy` no `config.env`)
+- Suporte a cookies (`config/cookies.txt`)
+- PO Token via Node.js (`js_runtimes: node`) para contornar restrições do YouTube
+- Logging estruturado em `logs/`
+- Script `test_download.py` para diagnóstico de downloads
 
 ## Stack
 
-- Python
-- discord.py
-- Flask
-- HTML, CSS e JavaScript
-- JSON
-
-## Habilidades demonstradas
-
-- Integração com API
-- Automação com Python
-- Execução concorrente com `threading`
-- Fluxo assíncrono com `asyncio`
-- Organização modular de código
-- Manipulação de arquivos JSON
-- Separação entre backend e interface web
-- Estruturação de aplicação para evolução futura
+- Python 3.12+
+- discord.py (com suporte a voz)
+- yt-dlp
+- FFmpeg
+- PyNaCl
+- python-dotenv
 
 ## Estrutura do projeto
 
-```bash
+```
 bot_discord/
-├── bot/
-├── web/
-├── main.py
-├── playlist.json
+├── main.py               # Entrypoint
+├── config.env            # Token e configurações (não versionar)
 ├── requirements.txt
-└── README.md
-````
+├── test_download.py      # Script de diagnóstico de download
+├── data/
+│   └── playlist.json     # Playlist persistida
+├── cache/                # Áudios temporários (auto-gerenciado)
+├── logs/                 # Logs da aplicação
+└── src/
+    ├── logger.py
+    └── bot/
+        └── bot.py        # Bot completo
+```
+
+## Requisitos
+
+- Python 3.12+
+- FFmpeg instalado e no PATH
+- Node.js instalado e no PATH (para PO Token do YouTube)
+
+```bash
+# Verificar dependências
+ffmpeg -version
+node --version
+```
 
 ## Como executar
 
 ```bash
 git clone <URL_DO_REPOSITORIO>
 cd bot_discord
+
 python -m venv .venv
-source .venv/bin/activate  # Linux
+source .venv/bin/activate   # Linux/macOS
+# .venv\Scripts\activate    # Windows
+
 pip install -r requirements.txt
 python main.py
 ```
 
-No Windows:
+### Configuração (`config.env`)
 
-```bash
-.venv\Scripts\activate
+```env
+token_discord=SEU_TOKEN_AQUI
+ytdlp_proxy=              # opcional: socks5://127.0.0.1:1080
 ```
 
-## Arquitetura resumida
+### Cookies (opcional)
 
-1. O usuário envia um link ou comando no Discord
-2. O bot processa a entrada e atualiza a playlist
-3. Os dados são persistidos localmente
-4. A aplicação web lê a playlist e exibe os vídeos no navegador
+Para vídeos com restrição de idade ou autenticação, coloque o arquivo de cookies exportado do navegador em:
+
+```
+config/cookies.txt
+```
+
+## Comandos
+
+### 🎵 Playlist
+
+| Comando | Descrição |
+|---|---|
+| `&add <url\|busca>` | Adiciona vídeo por URL, ID ou termo de busca |
+| `&playlist <url>` | Importa playlist ou YouTube Mix inteiro |
+| `&listar` | Lista os vídeos com paginação |
+| `&remove <pos\|id>` | Remove um vídeo da fila |
+| `&promover <pos\|id>` | Move um vídeo para ser o próximo |
+| `&limpar` | Limpa toda a playlist |
+
+### 🔊 Reprodução de Voz
+
+| Comando | Descrição |
+|---|---|
+| `&entrar` | Entra no canal de voz do usuário |
+| `&tocar` | Inicia a reprodução (auto-join se necessário) |
+| `&pausar` | Pausa o áudio |
+| `&retomar` | Retoma o áudio pausado |
+| `&parar` | Para sem sair da call |
+| `&sair` | Para e sai da call |
+| `&skip` | Pula para o próximo vídeo |
+| `&previous` | Volta ao vídeo anterior |
+| `&recomecar` | Recomeça a música atual do início |
+| `&aleatorio` | Liga/desliga modo aleatório 🔀 |
+| `&volume <0-200>` | Ajusta o volume (padrão: 25%) |
+| `&tocando` | Mostra o que está tocando |
+
+### 🎲 Diversão
+
+| Comando | Descrição |
+|---|---|
+| `&dado [lados]` | Lança um dado (padrão: d20) |
+
+## Modo Aleatório
+
+Ao ativar `&aleatorio`, o bot escolhe a próxima música aleatoriamente entre as que ainda **não foram tocadas** no ciclo atual. Quando todas as músicas do ciclo tiverem sido tocadas, as flags são resetadas automaticamente e um novo ciclo começa.
+
+## Diagnóstico de Download
+
+```bash
+# Testar se um vídeo pode ser baixado
+.venv/bin/python test_download.py https://www.youtube.com/watch?v=VIDEO_ID
+
+# Com proxy
+.venv/bin/python test_download.py --proxy socks5://127.0.0.1:1080 VIDEO_ID
+```
 
 ## Status
 
-**Projeto em desenvolvimento**
-
-O projeto já possui base funcional, mas ainda está em evolução. Melhorias previstas incluem uso de variáveis de ambiente, tratamento de erros, testes automatizados, banco de dados e containerização.
-
-## Objetivo no portfólio
-
-Este projeto faz parte do meu portfólio para demonstrar competências em automação, integração com API, backend em Python e organização de aplicações modulares.
+**Em desenvolvimento ativo.** Base funcional completa com reprodução de voz, gerenciamento de fila e modo aleatório implementados.
