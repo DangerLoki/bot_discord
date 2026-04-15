@@ -6,3 +6,5 @@ __pycache__/
 image.png
 melhorias.txt
 cache/
+run.fish
+.cache
