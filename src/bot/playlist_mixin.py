@@ -7,7 +7,7 @@ from datetime import datetime
 import discord
 
 from src.logger import get_logger
-from src.bot.utils import extrair_video_id, GeoBlockedError
+from src.bot.utils import extrair_video_id, GeoBlockedError, extrair_spotify_tipo_id, embed_carregando, embed_erro, embed_aviso
 
 logger = get_logger(__name__)
 
@@ -38,10 +38,11 @@ class PlaylistMixin:
     # Adição de vídeos
     # ------------------------------------------------------------------
 
-    async def adicionar_por_url(self, ctx, url: str):
+    async def adicionar_por_url(self, ctx, url: str, msg=None):
         video_id = extrair_video_id(url)
         if not video_id:
-            await ctx.send('URL inválida. Por favor, forneça uma URL válida do YouTube.')
+            _send = msg.edit if msg else ctx.send
+            await _send(embed=embed_erro('❌ URL inválida. Por favor, forneça uma URL válida do YouTube.'))
             return
 
         embed_url = f'https://www.youtube.com/watch?v={video_id}'
@@ -49,14 +50,22 @@ class PlaylistMixin:
 
         playlist = self.carregar_playlist()
         if any(item['video_id'] == video_id for item in playlist):
-            await ctx.send('⚠️ Este vídeo já está na playlist.')
+            _send = msg.edit if msg else ctx.send
+            await _send(embed=embed_aviso('⚠️ Este vídeo já está na playlist.'))
             return
 
-        await ctx.send(f'🔍 {ctx.author.mention} Obtendo informações do vídeo...')
+        if msg is None:
+            msg = await ctx.send(embed=embed_carregando('🔍 Obtendo informações do vídeo...'))
+        else:
+            try:
+                await msg.clear_reactions()
+            except Exception:
+                pass
+            await msg.edit(embed=embed_carregando('🔍 Obtendo informações do vídeo...'))
         info_video = await self.obter_info_video(url)
 
         if info_video and info_video.get('geo_blocked'):
-            await ctx.send('🌍 Este vídeo está bloqueado na sua região e não pode ser adicionado.')
+            await msg.edit(embed=embed_erro('🌍 Este vídeo está bloqueado na sua região e não pode ser adicionado.'))
             return
 
         registro = {
@@ -95,14 +104,14 @@ class PlaylistMixin:
             embed.add_field(name="Visualizações", value=f"{info_video['views']:,}", inline=True)
             embed.add_field(name="Posição na Playlist", value=str(registro['posicao']), inline=True)
         embed.set_footer(text="Vídeo adicionado com sucesso! ✅")
-        await ctx.send(embed=embed)
+        await msg.edit(embed=embed)
 
     async def adicionar_por_busca(self, ctx, termo: str, bot):
-        await ctx.send(f'🔍 {ctx.author.mention} Buscando vídeos para "{termo}"...')
+        msg = await ctx.send(embed=embed_carregando(f'🔍 Buscando vídeos para **"{termo}"**...'))
         resultados = await self.buscar_videos_youtube(termo)
 
         if not resultados:
-            await ctx.send('❌ Nenhum vídeo encontrado para o termo de busca fornecido.')
+            await msg.edit(embed=embed_erro('❌ Nenhum vídeo encontrado para o termo de busca fornecido.'))
             return
 
         emojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣']
@@ -118,7 +127,7 @@ class PlaylistMixin:
             description=descricao,
             color=0x00FF00,
         )
-        msg = await ctx.send(embed=embed)
+        await msg.edit(embed=embed)
         for emoji in emojis[:len(resultados)]:
             await msg.add_reaction(emoji)
 
@@ -132,16 +141,151 @@ class PlaylistMixin:
         try:
             reaction, _ = await bot.wait_for('reaction_add', timeout=30.0, check=check)
         except asyncio.TimeoutError:
-            await msg.edit(content='⏰ Tempo esgotado. Por favor, tente novamente.', embed=None)
+            await msg.edit(embed=embed_aviso('⏰ Tempo esgotado. Por favor, tente novamente.'))
             return
 
         indice = emojis.index(reaction.emoji)
         video = resultados[indice]
+        await self.adicionar_por_url(ctx, f"https://www.youtube.com/watch?v={video['video_id']}", msg=msg)
+
+    # ------------------------------------------------------------------
+    # Adição via Spotify
+    # ------------------------------------------------------------------
+
+    async def adicionar_spotify(self, ctx, url: str, bot):
+        """Ponto de entrada para URLs do Spotify (track, álbum ou playlist)."""
+        if not getattr(self, 'spotify_client_id', None) or not getattr(self, 'spotify_client_secret', None):
+            await ctx.send(embed=embed_erro(
+                '❌ Spotify não configurado.\n'
+                'Adicione `spotify_client_id` e `spotify_client_secret` ao `config.env`.\n'
+                'Crie suas credenciais em: <https://developer.spotify.com/dashboard>'
+            ))
+            return
+
+        tipo, spotify_id = extrair_spotify_tipo_id(url)
+        if not tipo:
+            await ctx.send(embed=embed_erro('❌ URL do Spotify inválida. Formatos aceitos: track, álbum ou playlist.'))
+            return
+
+        if tipo == 'track':
+            await self._adicionar_spotify_track(ctx, spotify_id)
+        elif tipo == 'album':
+            msg = await ctx.send(embed=embed_carregando('🎵 Consultando álbum no Spotify...'))
+            nome, artista, tracks = await self.obter_tracks_spotify_album(spotify_id)
+            if not tracks:
+                await msg.edit(embed=embed_erro('❌ Não foi possível obter as faixas do álbum.'))
+                return
+            titulo_label = f'💿 Álbum: {nome}' + (f' — {artista}' if artista else '')
+            await self._adicionar_spotify_coletivo(ctx, titulo_label, tracks, url, msg=msg)
+        elif tipo == 'playlist':
+            msg = await ctx.send(embed=embed_carregando('🎵 Consultando playlist no Spotify...'))
+            nome, tracks = await self.obter_tracks_spotify_playlist(spotify_id)
+            if not tracks:
+                await msg.edit(embed=embed_erro('❌ Não foi possível obter as faixas da playlist.'))
+                return
+            await self._adicionar_spotify_coletivo(ctx, f'🎶 Playlist: {nome}', tracks, url, msg=msg)
+        else:
+            await ctx.send(embed=embed_erro('❌ Tipo de URL do Spotify não suportado.'))
+
+    async def _adicionar_spotify_track(self, ctx, track_id: str):
+        """Busca uma faixa do Spotify no YouTube e adiciona à playlist."""
+        msg = await ctx.send(embed=embed_carregando('🎵 Consultando faixa no Spotify...'))
+        info = await self.obter_info_spotify_track(track_id)
+        if not info:
+            await msg.edit(embed=embed_erro('❌ Não foi possível obter informações da faixa no Spotify.'))
+            return
+
+        termo = f"{info['artista']} {info['titulo']}"
+        await msg.edit(embed=embed_carregando(f'🔍 Buscando no YouTube: **{termo}**...'))
+        resultados = await self.buscar_videos_youtube(termo, max_resultados=1)
+
+        if not resultados:
+            await msg.edit(embed=embed_erro(f'❌ Não foi possível encontrar **{termo}** no YouTube.'))
+            return
+
+        video = resultados[0]
+        await msg.delete()
         await self.adicionar_por_url(ctx, f"https://www.youtube.com/watch?v={video['video_id']}")
+
+    async def _adicionar_spotify_coletivo(
+        self, ctx, titulo_label: str, tracks: list, spotify_url: str, msg=None
+    ):
+        """Adiciona várias faixas do Spotify pesquisando cada uma no YouTube."""
+        total = len(tracks)
+        texto_inicial = f'{titulo_label}\n📋 {total} faixa(s) encontrada(s). Buscando no YouTube...'
+        if msg is None:
+            msg = await ctx.send(embed=embed_carregando(texto_inicial))
+        else:
+            await msg.edit(embed=embed_carregando(texto_inicial))
+
+        adicionados = 0
+        falhas = 0
+        playlist = self.carregar_playlist()
+        ids_existentes = {v['video_id'] for v in playlist}
+        novos_indices = []
+
+        for i, track in enumerate(tracks, 1):
+            termo = f"{track['artista']} {track['titulo']}"
+            try:
+                resultados = await self.buscar_videos_youtube(termo, max_resultados=1)
+                if not resultados:
+                    falhas += 1
+                    continue
+
+                video = resultados[0]
+                vid_id = video['video_id']
+
+                if vid_id in ids_existentes:
+                    continue  # já está na fila, não duplica
+
+                embed_url = f'https://www.youtube.com/watch?v={vid_id}'
+                playlist.append({
+                    'video_id': vid_id,
+                    'titulo': video.get('titulo', track['titulo']),
+                    'duracao': track.get('duracao'),
+                    'duracao_formatada': video.get('duracao_formatada', '??:??'),
+                    'canal': video.get('canal', track.get('artista', 'Desconhecido')),
+                    'embed_url': embed_url,
+                    'thumbnail_url': f'https://img.youtube.com/vi/{vid_id}/hqdefault.jpg',
+                    'adicionado_por': str(ctx.author),
+                    'data_adicionado': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'url': embed_url,
+                    'posicao': len(playlist) + 1,
+                    'tocado': False,
+                    'fonte': 'spotify',
+                    'spotify_titulo_original': track['titulo'],
+                })
+                novos_indices.append(len(playlist) - 1)
+                ids_existentes.add(vid_id)
+                adicionados += 1
+
+                # Atualiza mensagem de progresso a cada 10 faixas
+                if i % 10 == 0 or i == total:
+                    await msg.edit(
+                        embed=embed_carregando(
+                            f'{titulo_label}\n'
+                            f'🔄 Progresso: {i}/{total} — '
+                            f'✅ {adicionados} adicionadas, ❌ {falhas} não encontradas'
+                        )
+                    )
+            except Exception as e:
+                logger.error(f'[SPOTIFY] Erro ao adicionar faixa "{termo}": {e}')
+                falhas += 1
+
+        self.salvar_playlist(playlist)
+        for indice in novos_indices:
+            self._atualizar_shuffle_com_novo_video(indice)
+
+        embed = discord.Embed(title=titulo_label, color=0x1DB954, url=spotify_url)
+        embed.add_field(name='✅ Adicionadas', value=str(adicionados), inline=True)
+        embed.add_field(name='❌ Não encontradas', value=str(falhas), inline=True)
+        embed.add_field(name='📊 Total na fila', value=str(len(playlist)), inline=True)
+        embed.set_footer(text=f'Adicionado por {ctx.author} · via Spotify → YouTube')
+        await msg.edit(embed=embed)
 
     async def adicionar_playlist(self, ctx, url: str):
         """Adiciona todos os vídeos de uma playlist do YouTube à fila."""
-        msg = await ctx.send(f'🔍 {ctx.author.mention} Carregando playlist, aguarde...')
+        msg = await ctx.send(embed=embed_carregando('🔍 Carregando playlist, aguarde...'))
         titulo_pl, videos, is_mix = await self.obter_videos_playlist(url)
 
         if not videos:
@@ -153,7 +297,7 @@ class PlaylistMixin:
         playlist = self.carregar_playlist()
         ids_existentes = {v['video_id'] for v in playlist}
         tipo_icone = '🎲' if is_mix else '📋'
-        await msg.edit(content=f'{tipo_icone} **{titulo_pl}** — {len(videos)} vídeos encontrados. Adicionando...')
+        await msg.edit(embed=embed_carregando(f'{tipo_icone} **{titulo_pl}** — {len(videos)} vídeos encontrados. Adicionando...'))
 
         adicionados = 0
         duplicados = 0
@@ -191,7 +335,7 @@ class PlaylistMixin:
         embed.add_field(name='⚠️ Já na fila', value=str(duplicados), inline=True)
         embed.add_field(name='📊 Total na fila', value=str(len(playlist)), inline=True)
         embed.set_footer(text=f'Adicionado por {ctx.author}')
-        await msg.edit(content=None, embed=embed)
+        await msg.edit(embed=embed)
 
     # ------------------------------------------------------------------
     # Remoção / reordenação
@@ -413,7 +557,7 @@ class PlaylistMixin:
     async def pular_video(self, ctx):
         playlist = self.carregar_playlist()
         if not playlist:
-            await ctx.send('❌ Playlist vazia.')
+            await ctx.send(embed=embed_erro('❌ Playlist vazia.'))
             return
 
         if self.shuffle_mode:
@@ -441,7 +585,7 @@ class PlaylistMixin:
     async def voltar_video(self, ctx):
         playlist = self.carregar_playlist()
         if not playlist:
-            await ctx.send('❌ Playlist vazia.')
+            await ctx.send(embed=embed_erro('❌ Playlist vazia.'))
             return
         self.playlist_index = (self.playlist_index - 1) % len(playlist)
         # Pula músicas que já foram tocadas ao voltar

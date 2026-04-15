@@ -11,13 +11,14 @@ from dotenv import load_dotenv
 from src.logger import get_logger
 from src.bot.ui import PaginacaoPlaylist
 from src.bot.youtube_mixin import YouTubeMixin
+from src.bot.spotify_mixin import SpotifyMixin
 from src.bot.playlist_mixin import PlaylistMixin
 from src.bot.player_mixin import PlayerMixin
 
 logger = get_logger(__name__)
 
 
-class MyBot(PlaylistMixin, YouTubeMixin, PlayerMixin):
+class MyBot(PlaylistMixin, YouTubeMixin, SpotifyMixin, PlayerMixin):
     def __init__(self):
         diretorio_atual = os.path.dirname(__file__)
 
@@ -31,6 +32,13 @@ class MyBot(PlaylistMixin, YouTubeMixin, PlayerMixin):
         self.proxy = os.getenv('ytdlp_proxy', '').strip() or None
         if self.proxy:
             logger.info(f'[PROXY] usando proxy para yt-dlp: {self.proxy}')
+
+        self.spotify_client_id = os.getenv('spotify_client_id', '').strip() or None
+        self.spotify_client_secret = os.getenv('spotify_client_secret', '').strip() or None
+        if self.spotify_client_id:
+            logger.info('[SPOTIFY] credenciais carregadas.')
+        else:
+            logger.info('[SPOTIFY] não configurado (spotify_client_id ausente).')
 
         # Voice playback state
         self.voice_client = None
@@ -173,7 +181,10 @@ class MyBot(PlaylistMixin, YouTubeMixin, PlayerMixin):
         # comando para adicionar vídeo à playlist
         @bot.command()
         async def add(ctx, *, entrada: str):
-            if entrada.startswith('http') and ('list=' in entrada or 'playlist' in entrada):
+            if 'open.spotify.com' in entrada:
+                logger.info(f'[ADD SPOTIFY] {entrada} por {ctx.author}')
+                await self.adicionar_spotify(ctx, entrada, bot)
+            elif entrada.startswith('http') and ('list=' in entrada or 'playlist' in entrada):
                 logger.info(f'[ADD PLAYLIST] {entrada} por {ctx.author}')
                 await self.adicionar_playlist(ctx, entrada)
             elif entrada.startswith('http'):
@@ -191,7 +202,14 @@ class MyBot(PlaylistMixin, YouTubeMixin, PlayerMixin):
                 return
             logger.info(f'[ADD PLAYLIST] {url} por {ctx.author}')
             await self.adicionar_playlist(ctx, url)
-        
+        @bot.command(name='spotify', aliases=['sp', 'addspotify'])
+        async def spotify_cmd(ctx, *, url: str):
+            """Adiciona uma faixa, álbum ou playlist do Spotify"""
+            if 'open.spotify.com' not in url:
+                await ctx.send('\u274c Forneça uma URL válida do Spotify.\nExemplos:\n• `&spotify https://open.spotify.com/track/...`\n• `&spotify https://open.spotify.com/album/...`\n• `&spotify https://open.spotify.com/playlist/...`')
+                return
+            logger.info(f'[SPOTIFY CMD] {url} por {ctx.author}')
+            await self.adicionar_spotify(ctx, url, bot)        
         @bot.command()
         async def listar(ctx):
             playlist = self.carregar_playlist()
@@ -255,6 +273,7 @@ class MyBot(PlaylistMixin, YouTubeMixin, PlayerMixin):
             """Pausa o áudio"""
             if self.voice_client and self.voice_client.is_playing():
                 self.voice_client.pause()
+                self._pausar_rastreio()
                 await ctx.send('⏸️ Áudio pausado.')
             else:
                 await ctx.send('❌ Nenhum áudio tocando.')
@@ -264,6 +283,7 @@ class MyBot(PlaylistMixin, YouTubeMixin, PlayerMixin):
             """Retoma o áudio pausado"""
             if self.voice_client and self.voice_client.is_paused():
                 self.voice_client.resume()
+                self._retomar_rastreio()
                 await ctx.send('▶️ Áudio retomado.')
             else:
                 await ctx.send('❌ Nenhum áudio pausado.')
@@ -273,6 +293,7 @@ class MyBot(PlaylistMixin, YouTubeMixin, PlayerMixin):
             """Para o áudio sem sair da call"""
             if self.voice_client and (self.voice_client.is_playing() or self.voice_client.is_paused()):
                 self.is_playing_voice = False
+                self._parar_status_loop()
                 self.voice_client.stop()
                 await ctx.send('⏹️ Áudio parado.')
             else:
@@ -283,6 +304,7 @@ class MyBot(PlaylistMixin, YouTubeMixin, PlayerMixin):
             """Para o áudio e sai da call"""
             if self.voice_client:
                 self.is_playing_voice = False
+                self._parar_status_loop()
                 self.voice_client.stop()
                 await self.voice_client.disconnect()
                 self.voice_client = None
@@ -360,8 +382,9 @@ class MyBot(PlaylistMixin, YouTubeMixin, PlayerMixin):
             embed.add_field(
                 name='🎵 Playlist',
                 value=(
-                    '`&add <url|busca>` — Adiciona vídeo ou playlist\n'
-                    '`&playlist <url>` — Adiciona playlist inteira\n'
+                    '`&add <url|busca>` — Adiciona vídeo, playlist YouTube ou URL Spotify\n'
+                    '`&playlist <url>` — Adiciona playlist inteira do YouTube\n'
+                    '`&spotify <url>` — Adiciona faixa/álbum/playlist do Spotify 🐟\n'
                     '`&listar` — Lista os vídeos (paginado)\n'
                     '`&remove <pos|id>` — Remove um vídeo\n'
                     '`&promover <pos|id>` — Move para próxima posição\n'

@@ -1,18 +1,104 @@
 import os
 import asyncio
 import random
+import time
 
 import discord
 import yt_dlp
 
 from src.logger import get_logger
-from src.bot.utils import GeoBlockedError, _is_geo_blocked
+from src.bot.utils import GeoBlockedError, _is_geo_blocked, formatar_duracao, embed_carregando, embed_erro, embed_aviso
 
 logger = get_logger(__name__)
 
 
 class PlayerMixin:
     """Métodos de reprodução de áudio em canal de voz."""
+
+    # ------------------------------------------------------------------
+    # Status do bot (presença / activity)
+    # ------------------------------------------------------------------
+
+    def _iniciar_rastreio_tempo(self, duracao_total: int):
+        """Salva o instante de início e a duração total da música."""
+        self._playback_start = time.monotonic()
+        self._playback_paused_at = None
+        self._playback_duracao = duracao_total  # segundos
+
+    def _tempo_decorrido(self) -> int:
+        """Retorna segundos decorridos (descontando pausas)."""
+        if not hasattr(self, '_playback_start') or self._playback_start is None:
+            return 0
+        if self._playback_paused_at is not None:
+            return int(self._playback_paused_at - self._playback_start)
+        return int(time.monotonic() - self._playback_start)
+
+    def _pausar_rastreio(self):
+        if hasattr(self, '_playback_start') and self._playback_paused_at is None:
+            self._playback_paused_at = time.monotonic()
+
+    def _retomar_rastreio(self):
+        if hasattr(self, '_playback_paused_at') and self._playback_paused_at is not None:
+            pausa = time.monotonic() - self._playback_paused_at
+            self._playback_start += pausa
+            self._playback_paused_at = None
+
+    async def _atualizar_status(self, titulo: str, duracao: int):
+        """Atualiza a presença do bot com a música atual e tempo."""
+        bot = getattr(self, 'voice_bot', None)
+        if not bot:
+            return
+        decorrido = formatar_duracao(self._tempo_decorrido())
+        total = formatar_duracao(duracao)
+        activity = discord.Activity(
+            type=discord.ActivityType.listening,
+            name=f'{titulo} [{decorrido}/{total}]',
+        )
+        try:
+            await bot.change_presence(activity=activity)
+        except Exception:
+            pass
+
+    async def _limpar_status(self):
+        """Remove a presença do bot."""
+        bot = getattr(self, 'voice_bot', None)
+        if not bot:
+            return
+        try:
+            await bot.change_presence(activity=None)
+        except Exception:
+            pass
+
+    async def _status_loop(self):
+        """Loop que atualiza o status a cada 5 segundos enquanto toca.
+
+        O Discord tem rate-limit em change_presence (~15s de propagação
+        para outros usuários), então 5s é o melhor equilíbrio entre
+        precisão e respeito ao limite.
+        """
+        try:
+            while self.is_playing_voice:
+                titulo = getattr(self, '_status_titulo', '')
+                duracao = getattr(self, '_playback_duracao', 0)
+                if titulo:
+                    await self._atualizar_status(titulo, duracao)
+                await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await self._limpar_status()
+
+    def _iniciar_status_loop(self):
+        """Inicia a task de atualização do status."""
+        if hasattr(self, '_status_task') and self._status_task and not self._status_task.done():
+            self._status_task.cancel()
+        loop = self.voice_bot.loop if self.voice_bot else asyncio.get_event_loop()
+        self._status_task = loop.create_task(self._status_loop())
+
+    def _parar_status_loop(self):
+        """Para a task de atualização do status."""
+        if hasattr(self, '_status_task') and self._status_task and not self._status_task.done():
+            self._status_task.cancel()
 
     # ------------------------------------------------------------------
     # Download e cache
@@ -122,7 +208,7 @@ class PlayerMixin:
 
     async def _tocar_atual_impl(self, ctx):
         if not self.voice_client or not self.voice_client.is_connected():
-            await ctx.send('❌ Não estou em nenhum canal de voz!')
+            await ctx.send(embed=embed_erro('❌ Não estou em nenhum canal de voz!'))
             return
 
         if self.voice_client.is_playing() or self.voice_client.is_paused():
@@ -132,11 +218,22 @@ class PlayerMixin:
         while True:
             playlist = self.carregar_playlist()
             if not playlist:
-                await ctx.send('❌ Playlist vazia. Adicione vídeos com `&add`.')
+                await ctx.send(embed=embed_erro('❌ Playlist vazia. Adicione vídeos com `&add`.'))
                 return
 
             if self.playlist_index >= len(playlist):
                 self.playlist_index = 0
+
+            # Pula músicas já tocadas (a menos que todas já tenham sido)
+            if not self.shuffle_mode:
+                inicio = self.playlist_index
+                while playlist[self.playlist_index].get('tocado', False):
+                    self.playlist_index = (self.playlist_index + 1) % len(playlist)
+                    if self.playlist_index == inicio:
+                        # Todas já foram tocadas — avisa e para
+                        await ctx.send(embed=embed_aviso('📋 Todas as músicas já foram tocadas! Use `&recomecar` ou adicione novas.'))
+                        self.is_playing_voice = False
+                        return
 
             video = playlist[self.playlist_index]
             total = len(playlist)
@@ -144,7 +241,7 @@ class PlayerMixin:
             video_url = video.get('embed_url', '')
             video_id = video.get('video_id', '')
 
-            await ctx.send(f'🔄 Baixando áudio de **{titulo}**...')
+            msg_carregando = await ctx.send(embed=embed_carregando(f'🔄 Carregando **{titulo}**...'))
 
             playlist[self.playlist_index]['tocado'] = True
             # Se está em modo shuffle, salva o shuffle_id e posicao_shuffle
@@ -157,20 +254,20 @@ class PlayerMixin:
             try:
                 audio_path = await self.baixar_audio(video_url, video_id)
             except GeoBlockedError:
-                await ctx.send(f'🌍 **{titulo}** está bloqueado na sua região e foi removido da playlist.')
+                await msg_carregando.edit(embed=embed_erro(f'🌍 **{titulo}** está bloqueado na sua região e foi removido da playlist.'))
                 playlist = self.carregar_playlist()
                 playlist = [v for v in playlist if v.get('video_id') != video_id]
                 for i, v in enumerate(playlist):
                     v['posicao'] = i + 1
                 self.salvar_playlist(playlist)
                 if not playlist:
-                    await ctx.send('📋 Playlist vazia após remoção.')
+                    await ctx.send(embed=embed_aviso('📋 Playlist vazia após remoção.'))
                     return
                 self.playlist_index = self.playlist_index % len(playlist)
                 continue
 
             if not audio_path:
-                await ctx.send(f'❌ Não consegui baixar o áudio de **{titulo}**. Pulando...')
+                await msg_carregando.edit(embed=embed_erro(f'❌ Não consegui baixar o áudio de **{titulo}**. Pulando...'))
                 self.playlist_index = (self.playlist_index + 1) % len(playlist)
                 # Pula músicas que já foram tocadas
                 tentativas = 0
@@ -184,11 +281,19 @@ class PlayerMixin:
             source = discord.FFmpegPCMAudio(audio_path)
             source = discord.PCMVolumeTransformer(source, volume=self.voice_volume)
         except Exception as e:
-            await ctx.send(f'❌ Erro ao criar stream de áudio: {e}')
+            await ctx.send(embed=embed_erro(f'❌ Erro ao criar stream de áudio: {e}'))
             return
 
         self.is_playing_voice = True
         video_id_atual = video.get('video_id', '')
+        # Usa título original do Spotify (artista - música) quando disponível
+        if video.get('fonte') == 'spotify' and video.get('spotify_titulo_original'):
+            canal = video.get('canal', '')
+            self._status_titulo = f"{canal} - {video['spotify_titulo_original']}" if canal else video['spotify_titulo_original']
+        else:
+            self._status_titulo = titulo
+        self._iniciar_rastreio_tempo(video.get('duracao', 0) or 0)
+        self._iniciar_status_loop()
 
         def after_playing(error):
             if error:
@@ -210,18 +315,19 @@ class PlayerMixin:
         embed.add_field(name='Duração', value=video.get('duracao_formatada', '??:??'), inline=True)
         embed.add_field(name='Posição', value=f"{self.playlist_index + 1}/{total}", inline=True)
         embed.add_field(name='Volume', value=f'{int(self.voice_volume * 100)}%', inline=True)
-        await ctx.send(embed=embed)
+        await msg_carregando.edit(embed=embed)
         logger.info(f'[VOZ] Tocando: {titulo}')
 
     async def _auto_next(self, ctx):
         """Chamado automaticamente ao terminar uma música."""
+        self._parar_status_loop()
         if not self.is_playing_voice:
             return
 
         playlist = self.carregar_playlist()
         if not playlist:
             self.is_playing_voice = False
-            await ctx.send('📋 Playlist terminou!')
+            await ctx.send(embed=embed_aviso('📋 Playlist terminou!'))
             return
 
         if self.shuffle_mode:
@@ -231,7 +337,7 @@ class PlayerMixin:
             if self.playlist_index >= len(playlist):
                 self.playlist_index = 0
                 self.is_playing_voice = False
-                await ctx.send('📋 Playlist terminou! Use `&tocar` para recomeçar.')
+                await ctx.send(embed=embed_aviso('📋 Playlist terminou! Use `&tocar` para recomeçar.'))
                 return
             
             # Verifica se a próxima música já foi tocada e pula para a próxima não tocada
@@ -242,7 +348,7 @@ class PlayerMixin:
             if self.playlist_index >= len(playlist):
                 self.playlist_index = 0
                 self.is_playing_voice = False
-                await ctx.send('📋 Playlist terminou! Use `&tocar` para recomeçar.')
+                await ctx.send(embed=embed_aviso('📋 Playlist terminou! Use `&tocar` para recomeçar.'))
                 return
 
         await self.tocar_atual(ctx)
