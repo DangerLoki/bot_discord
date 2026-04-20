@@ -31,7 +31,8 @@ class PaginacaoPlaylist(View):
             descricao = ""
             for item in itens_pagina:
                 pos = item.get('posicao_shuffle', item['posicao'])
-                descricao += f"**{pos}.** [{item['titulo']}]({item['embed_url']})\n"
+                tocado_label = ' ✅' if item.get('tocado') else ''
+                descricao += f"**{pos}.** [{item['titulo']}]({item['embed_url']}){tocado_label}\n"
                 descricao += f"└ Por: {item['adicionado_por']} | ⏱️ {item['duracao_formatada']}\n\n"
             embed.description = descricao
             

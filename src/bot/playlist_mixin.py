@@ -433,11 +433,110 @@ class PlaylistMixin:
         embed.set_footer(text=f"Removido por {ctx.author}")
         await ctx.send(embed=embed)
 
-    async def promover_video(self, ctx, entrada: str = None):
+    # ------------------------------------------------------------------
+    # Busca por título (auxiliar para promover_video / remover_video)
+    # ------------------------------------------------------------------
+
+    async def _resolver_entrada_por_titulo(self, ctx, bot, playlist: list, entrada: str):
+        """Tenta resolver uma entrada de texto como título (parcial/case-insensitive).
+
+        Retorna (index_video, video, msg) em caso de sucesso, onde msg é a
+        mensagem interativa que pode ser editada pelo chamador para o resultado
+        final (None se não houve interação). Retorna (None, None, None) se o
+        usuário cancelar / não for encontrado.
+        """
+        entrada_lower = entrada.lower()
+
+        # Coleta candidatos: (índice_na_playlist, video)
+        candidatos = []
+        for i, v in enumerate(playlist):
+            titulo = v.get('titulo', '')
+            if entrada_lower == titulo.lower():
+                # Match exato (case-insensitive) → usa imediatamente, sem interação
+                return i, v, None
+            if entrada_lower in titulo.lower():
+                candidatos.append((i, v))
+
+        if not candidatos:
+            return None, None, None
+
+        if len(candidatos) == 1:
+            # Um único resultado parcial → pede confirmação com reações
+            idx, video = candidatos[0]
+            titulo_video = video.get('titulo', 'Desconhecido')
+            embed = discord.Embed(
+                title="🔍 Confirmar Promoção",
+                description=(
+                    f"Você quis dizer:\n\n"
+                    f"**{titulo_video}**\n\n"
+                    f"Reaja com ✅ para confirmar ou ❌ para cancelar."
+                ),
+                color=0x5865F2,
+            )
+            embed.set_thumbnail(url=video.get('thumbnail_url', ''))
+            msg = await ctx.send(embed=embed)
+            await msg.add_reaction('✅')
+            await msg.add_reaction('❌')
+
+            def check_reacao(reaction, user):
+                return (
+                    user == ctx.author
+                    and reaction.message.id == msg.id
+                    and str(reaction.emoji) in ('✅', '❌')
+                )
+
+            try:
+                reaction, _ = await bot.wait_for('reaction_add', check=check_reacao, timeout=30.0)
+            except asyncio.TimeoutError:
+                await msg.edit(embed=embed_aviso('⏰ Tempo esgotado. Promoção cancelada.'))
+                return None, None, None
+
+            if str(reaction.emoji) == '✅':
+                return idx, video, msg
+            else:
+                await msg.edit(embed=embed_aviso('❌ Promoção cancelada.'))
+                return None, None, None
+
+        # Múltiplos resultados → lista para o usuário escolher com reações
+        max_mostrar = min(len(candidatos), 9)
+        emojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣']
+        descricao = "Encontrei mais de um resultado. Qual você quer promover?\n\n"
+        for i in range(max_mostrar):
+            _, video = candidatos[i]
+            descricao += f"{emojis[i]} **{video.get('titulo', 'Desconhecido')}**\n"
+        descricao += "\nReaja com o número da opção desejada."
+
+        embed = discord.Embed(
+            title="🔍 Múltiplos Resultados",
+            description=descricao,
+            color=0x5865F2,
+        )
+        msg = await ctx.send(embed=embed)
+        for emoji in emojis[:max_mostrar]:
+            await msg.add_reaction(emoji)
+
+        def check_multi(reaction, user):
+            return (
+                user == ctx.author
+                and reaction.message.id == msg.id
+                and reaction.emoji in emojis[:max_mostrar]
+            )
+
+        try:
+            reaction, _ = await bot.wait_for('reaction_add', check=check_multi, timeout=30.0)
+        except asyncio.TimeoutError:
+            await msg.edit(embed=embed_aviso('⏰ Tempo esgotado. Promoção cancelada.'))
+            return None, None, None
+
+        escolha = emojis.index(reaction.emoji)
+        idx, video = candidatos[escolha]
+        return idx, video, msg
+
+    async def promover_video(self, ctx, entrada: str = None, bot=None):
         if not entrada:
             await ctx.send(
-                "❌ Use: `&promover <posição>` ou `&promover <video_id>`\n"
-                "Exemplos: `&promover 6` | `&promover dQw4w9WgXcQ`"
+                "❌ Use: `&promover <posição>`, `&promover <video_id>` ou `&promover <nome da música>`\n"
+                "Exemplos: `&promover 6` | `&promover dQw4w9WgXcQ` | `&promover never gonna`"
             )
             return
 
@@ -446,6 +545,40 @@ class PlaylistMixin:
             await ctx.send("⚠️ A playlist está vazia.")
             return
 
+        # --- Auxiliar: resolve entrada não-numérica por video_id ou título ---
+        async def _resolver_nao_numerico(entrada_str: str):
+            video_id = extrair_video_id(entrada_str)
+            if video_id:
+                v = next((x for x in playlist if x.get('video_id') == video_id), None)
+                if not v:
+                    await ctx.send(f"❌ Não encontrei nenhum vídeo com ID `{video_id}` na playlist.")
+                    return None, None, None
+                i = next(j for j, x in enumerate(playlist) if x.get('video_id') == video_id)
+                return i, v, None
+
+            # Tenta match exato por video_id (sem extrair URL)
+            vid = entrada_str.strip()
+            v = next((x for x in playlist if x.get('video_id') == vid), None)
+            if v:
+                i = next(j for j, x in enumerate(playlist) if x.get('video_id') == vid)
+                return i, v, None
+
+            # Fallback: busca por título (parcial, case-insensitive)
+            if bot is None:
+                await ctx.send(f"❌ Não encontrei nenhum vídeo com ID `{vid}` na playlist.")
+                return None, None, None
+
+            i, v, msg = await self._resolver_entrada_por_titulo(ctx, bot, playlist, entrada_str)
+            if v is None and msg is None:
+                # Só envia mensagem de erro se _resolver não enviou nenhuma
+                entrada_lower_check = entrada_str.lower()
+                achou_candidato = any(entrada_lower_check in x.get('titulo', '').lower() for x in playlist)
+                if not achou_candidato:
+                    await ctx.send(f"❌ Nenhuma música encontrada com o nome **\"{entrada_str}\"** na playlist.")
+            return i, v, msg
+
+        confirm_msg = None  # mensagem interativa reutilizável para o resultado final
+
         # Se shuffle estiver ativo, trabalha com posições da lista shuffle
         if self.shuffle_mode and self.shuffle_playlist:
             if entrada.isdigit():
@@ -453,16 +586,12 @@ class PlaylistMixin:
                 if shuffle_pos < 0 or shuffle_pos >= len(self.shuffle_playlist):
                     await ctx.send(f"❌ Posição inválida. A lista aleatória tem {len(self.shuffle_playlist)} vídeos.")
                     return
-                # Converte posição da lista shuffle para índice na playlist base
                 index_video = self.shuffle_playlist[shuffle_pos]
                 video = playlist[index_video]
             else:
-                video_id = extrair_video_id(entrada) or entrada.strip()
-                video = next((v for v in playlist if v.get('video_id') == video_id), None)
-                if not video:
-                    await ctx.send(f"❌ Não encontrei nenhum vídeo com ID `{video_id}` na playlist.")
+                index_video, video, confirm_msg = await _resolver_nao_numerico(entrada)
+                if video is None:
                     return
-                index_video = next((i for i, v in enumerate(playlist) if v.get('video_id') == video_id), None)
         else:
             # Modo normal
             if entrada.isdigit():
@@ -472,12 +601,9 @@ class PlaylistMixin:
                     return
                 video = playlist[index_video]
             else:
-                video_id = extrair_video_id(entrada) or entrada.strip()
-                video = next((v for v in playlist if v.get('video_id') == video_id), None)
-                if not video:
-                    await ctx.send(f"❌ Não encontrei nenhum vídeo com ID `{video_id}` na playlist.")
+                index_video, video, confirm_msg = await _resolver_nao_numerico(entrada)
+                if video is None:
                     return
-                index_video = next((i for i, v in enumerate(playlist) if v.get('video_id') == video_id), None)
 
         video_id = video.get('video_id')
         if index_video == self.playlist_index:
@@ -531,7 +657,10 @@ class PlaylistMixin:
         embed.add_field(name="Nova Posição", value=str(nova_pos), inline=True)
         embed.add_field(name="Canal", value=video.get('canal', 'Desconhecido'), inline=True)
         embed.set_footer(text=f"Promovido por {ctx.author}")
-        await ctx.send(embed=embed)
+        if confirm_msg:
+            await confirm_msg.edit(embed=embed)
+        else:
+            await ctx.send(embed=embed)
 
     async def limpar_playlist(self, ctx):
         playlist = self.carregar_playlist()

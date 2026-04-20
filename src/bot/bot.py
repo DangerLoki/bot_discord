@@ -151,7 +151,7 @@ class MyBot(PlaylistMixin, YouTubeMixin, SpotifyMixin, PlayerMixin):
         async def promover(ctx, *, entrada: str = None):
             """Move um vídeo para ser o próximo a tocar"""
             logger.info(f'[PROMOTE] entrada="{entrada}" solicitado por {ctx.author} em #{ctx.channel}')
-            await self.promover_video(ctx, entrada)
+            await self.promover_video(ctx, entrada, bot)
 
         @bot.command(name='limpar', aliases=['clear', 'clearall', 'limpartudo'])
         async def limpar(ctx):
@@ -387,7 +387,7 @@ class MyBot(PlaylistMixin, YouTubeMixin, SpotifyMixin, PlayerMixin):
                     '`&spotify <url>` — Adiciona faixa/álbum/playlist do Spotify 🐟\n'
                     '`&listar` — Lista os vídeos (paginado)\n'
                     '`&remove <pos|id>` — Remove um vídeo\n'
-                    '`&promover <pos|id>` — Move para próxima posição\n'
+                    '`&promover <pos|id|nome>` — Move para próxima posição\n'
                     '`&limpar` — Limpa toda a playlist'
                 ),
                 inline=False
