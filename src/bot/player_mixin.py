@@ -243,7 +243,6 @@ class PlayerMixin:
 
             msg_carregando = await ctx.send(embed=embed_carregando(f'🔄 Carregando **{titulo}**...'))
 
-            playlist[self.playlist_index]['tocado'] = True
             # Se está em modo shuffle, salva o shuffle_id e posicao_shuffle
             if self.shuffle_mode and self.shuffle_id:
                 posicao_shuffle = self.shuffle_index + 1  # Posição atual no shuffle
@@ -325,6 +324,10 @@ class PlayerMixin:
             return
 
         playlist = self.carregar_playlist()
+        # Marca a música atual como tocada apenas agora que ela terminou
+        if playlist and self.playlist_index < len(playlist):
+            playlist[self.playlist_index]['tocado'] = True
+            self.salvar_playlist(playlist)
         if not playlist:
             self.is_playing_voice = False
             await ctx.send(embed=embed_aviso('📋 Playlist terminou!'))
