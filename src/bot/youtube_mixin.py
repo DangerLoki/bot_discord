@@ -14,6 +14,7 @@ class YouTubeMixin:
 
     async def obter_info_video(self, url: str):
         """Obtém metadados de um vídeo. Retorna dict ou None em caso de erro."""
+        import time as _time
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
@@ -27,20 +28,25 @@ class YouTubeMixin:
             ydl_opts['proxy'] = self.proxy
 
         def _extract():
+            t0 = _time.perf_counter()
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
-                    return {
-                        'titulo': info.get('title', 'Título não disponível'),
-                        'duracao': info.get('duration', 0),
-                        'duracao_formatada': formatar_duracao(info.get('duration', 0)),
-                        'canal': info.get('uploader', 'Desconhecido'),
-                        'views': info.get('view_count', 0),
-                    }
+                elapsed = _time.perf_counter() - t0
+                logger.info(f'[PERF][INFO] url={url} tempo={elapsed:.2f}s')
+                return {
+                    'titulo': info.get('title', 'Título não disponível'),
+                    'duracao': info.get('duration', 0),
+                    'duracao_formatada': formatar_duracao(info.get('duration', 0)),
+                    'canal': info.get('uploader', 'Desconhecido'),
+                    'views': info.get('view_count', 0),
+                }
             except Exception as e:
+                elapsed = _time.perf_counter() - t0
                 if _is_geo_blocked(str(e)):
+                    logger.warning(f'[PERF][INFO] geo-blocked após {elapsed:.2f}s: {url}')
                     return {'geo_blocked': True}
-                logger.error(f'Erro ao obter info do vídeo: {e}', exc_info=True)
+                logger.error(f'[PERF][INFO] erro após {elapsed:.2f}s: {e}', exc_info=True)
                 return None
 
         return await asyncio.to_thread(_extract)
@@ -64,23 +70,32 @@ class YouTubeMixin:
         }
 
         def _search():
+            import time as _time
+            t0 = _time.perf_counter()
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(
                         f"ytsearch{max_resultados}:{termo_busca}", download=False
                     )
-                    return [
-                        {
-                            'video_id': e.get('id'),
-                            'titulo': e.get('title'),
-                            'url': e.get('webpage_url'),
-                            'canal': e.get('uploader'),
-                            'duracao_formatada': formatar_duracao(e.get('duration')),
-                        }
-                        for e in info.get('entries', [])
-                    ]
+                results = [
+                    {
+                        'video_id': e.get('id'),
+                        'titulo': e.get('title'),
+                        'url': e.get('webpage_url'),
+                        'canal': e.get('uploader'),
+                        'duracao_formatada': formatar_duracao(e.get('duration')),
+                    }
+                    for e in info.get('entries', [])
+                ]
+                elapsed = _time.perf_counter() - t0
+                logger.info(
+                    f'[PERF][BUSCA] termo="{termo_busca}" '
+                    f'resultados={len(results)} tempo={elapsed:.2f}s'
+                )
+                return results
             except Exception as e:
-                logger.error(f'Erro ao buscar vídeos: {e}', exc_info=True)
+                elapsed = _time.perf_counter() - t0
+                logger.error(f'[PERF][BUSCA] erro após {elapsed:.2f}s: {e}', exc_info=True)
                 return []
 
         return await asyncio.to_thread(_search)
@@ -121,10 +136,13 @@ class YouTubeMixin:
             ydl_opts['cookiefile'] = self.cookies_file
 
         def _extract():
+            import time as _time
+            t0 = _time.perf_counter()
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(extract_url, download=False)
                     if not info:
+                        logger.warning(f'[PERF][PLAYLIST] sem resposta após {_time.perf_counter()-t0:.2f}s: {extract_url}')
                         return None, [], is_mix
                     if info.get('_type') == 'video' or 'entries' not in info:
                         logger.warning('yt-dlp retornou vídeo único, esperava playlist')
@@ -146,10 +164,15 @@ class YouTubeMixin:
                             'embed_url': f'https://www.youtube.com/watch?v={vid_id}',
                             'thumbnail_url': f'https://img.youtube.com/vi/{vid_id}/hqdefault.jpg',
                         })
-                    logger.info(f'["{titulo_pl}"] {len(videos)} vídeos extraídos (mix={is_mix})')
+                    elapsed = _time.perf_counter() - t0
+                    logger.info(
+                        f'[PERF][PLAYLIST] "{titulo_pl}" '
+                        f'{len(videos)} vídeos extraídos (mix={is_mix}) tempo={elapsed:.2f}s'
+                    )
                     return titulo_pl, videos, is_mix
             except Exception as e:
-                logger.error(f'Erro ao extrair playlist: {e}', exc_info=True)
+                elapsed = _time.perf_counter() - t0
+                logger.error(f'[PERF][PLAYLIST] erro após {elapsed:.2f}s: {e}', exc_info=True)
                 return None, [], is_mix
 
         return await asyncio.to_thread(_extract)

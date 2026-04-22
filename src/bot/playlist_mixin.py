@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import random
+import time
 from datetime import datetime
 
 import discord
@@ -39,6 +40,7 @@ class PlaylistMixin:
     # ------------------------------------------------------------------
 
     async def adicionar_por_url(self, ctx, url: str, msg=None):
+        _t0 = time.perf_counter()
         video_id = extrair_video_id(url)
         if not video_id:
             _send = msg.edit if msg else ctx.send
@@ -89,7 +91,11 @@ class PlaylistMixin:
         novo_indice = len(playlist) - 1
         self._atualizar_shuffle_com_novo_video(novo_indice)
         
-        logger.info(f'[ADD] "{registro["titulo"]}" ({video_id}) por {ctx.author} — pos {registro["posicao"]}')
+        _elapsed = time.perf_counter() - _t0
+        logger.info(
+            f'[PERF][ADD_URL] "{registro["titulo"]}" ({video_id}) '
+            f'por {ctx.author} — pos {registro["posicao"]} — tempo total={_elapsed:.2f}s'
+        )
 
         embed = discord.Embed(
             title=info_video['titulo'] if info_video else 'Vídeo Adicionado à Playlist',
@@ -107,8 +113,10 @@ class PlaylistMixin:
         await msg.edit(embed=embed)
 
     async def adicionar_por_busca(self, ctx, termo: str, bot):
+        _t0 = time.perf_counter()
         msg = await ctx.send(embed=embed_carregando(f'🔍 Buscando vídeos para **"{termo}"**...'))
         resultados = await self.buscar_videos_youtube(termo)
+        logger.debug(f'[PERF][ADD_BUSCA] busca concluída em {time.perf_counter()-_t0:.2f}s para "{termo}"')
 
         if not resultados:
             await msg.edit(embed=embed_erro('❌ Nenhum vídeo encontrado para o termo de busca fornecido.'))

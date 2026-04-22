@@ -92,13 +92,17 @@ class SpotifyMixin:
 
     async def obter_info_spotify_track(self, track_id: str) -> dict | None:
         """Obtém metadados de uma faixa do Spotify."""
+        import time as _time
 
         def _fetch():
+            t0 = _time.perf_counter()
             sp = self._criar_spotify_client()
             if not sp:
                 return None
             try:
                 t = self._spotify_get(sp, f'tracks/{track_id}')
+                elapsed = _time.perf_counter() - t0
+                logger.info(f'[PERF][SPOTIFY_TRACK] track_id={track_id} tempo={elapsed:.2f}s')
                 return {
                     'titulo': t['name'],
                     'artista': ', '.join(a['name'] for a in t['artists']),
@@ -106,7 +110,8 @@ class SpotifyMixin:
                     'duracao': t['duration_ms'] // 1000,
                 }
             except Exception as e:
-                logger.error(f'[SPOTIFY] Erro ao obter track {track_id}: {e}')
+                elapsed = _time.perf_counter() - t0
+                logger.error(f'[PERF][SPOTIFY_TRACK] erro após {elapsed:.2f}s track_id={track_id}: {e}')
                 return None
 
         return await asyncio.to_thread(_fetch)

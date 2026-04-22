@@ -110,8 +110,10 @@ class PlayerMixin:
         """
         existente = list(self.cache_dir.glob(f'{video_id}.*'))
         if existente:
-            logger.debug(f'[CACHE] usando arquivo em cache: {existente[0]}')
+            logger.debug(f'[CACHE][HIT] usando arquivo em cache: {existente[0]}')
             return str(existente[0])
+
+        logger.debug(f'[CACHE][MISS] arquivo não encontrado no cache para video_id={video_id}')
 
         destino = self.cache_dir / video_id
         opts = {
@@ -133,15 +135,31 @@ class PlayerMixin:
             opts['proxy'] = self.proxy
 
         def _download():
+            t0 = time.perf_counter()
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     ydl.download([video_url])
                 resultado = list(self.cache_dir.glob(f'{video_id}.*'))
+                elapsed = time.perf_counter() - t0
+                if resultado:
+                    size_mb = resultado[0].stat().st_size / (1024 * 1024)
+                    logger.info(
+                        f'[PERF][DOWNLOAD] video_id={video_id} '  
+                        f'tempo={elapsed:.2f}s tamanho={size_mb:.1f}MB'
+                    )
+                else:
+                    logger.warning(
+                        f'[PERF][DOWNLOAD] video_id={video_id} '
+                        f'tempo={elapsed:.2f}s — nenhum arquivo gerado'
+                    )
                 return str(resultado[0]) if resultado else None
             except Exception as e:
+                elapsed = time.perf_counter() - t0
+                logger.error(
+                    f'[PERF][DOWNLOAD] video_id={video_id} falhou após {elapsed:.2f}s: {e}'
+                )
                 if _is_geo_blocked(str(e)):
                     raise GeoBlockedError(str(e))
-                logger.error(f'[yt-dlp] erro ao baixar {video_url}: {e}')
                 return None
 
         return await asyncio.to_thread(_download)
@@ -202,9 +220,13 @@ class PlayerMixin:
     async def tocar_atual(self, ctx):
         """Ponto de entrada público — garante execução exclusiva via lock."""
         if self._carregando.locked():
+            logger.debug('[PERF][TOCAR] lock ocupado — chamada ignorada')
             return
+        t0 = time.perf_counter()
         async with self._carregando:
             await self._tocar_atual_impl(ctx)
+        elapsed = time.perf_counter() - t0
+        logger.info(f'[PERF][TOCAR] tempo total até início da reprodução: {elapsed:.2f}s')
 
     async def _tocar_atual_impl(self, ctx):
         if not self.voice_client or not self.voice_client.is_connected():
