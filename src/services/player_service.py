@@ -10,13 +10,16 @@ from src.repositories.playlist_repository import PlaylistRepository
 from src.services.youtube_service import YouTubeService
 from src.services.playlist_service import PlaylistService
 from src.services.player_status import PlayerStatus
-from src.utils import GeoBlockedError, formatar_duracao, embed_carregando, embed_erro, embed_aviso
+from src.utils import GeoBlockedError, embed_carregando, embed_erro, embed_aviso
 
 logger = get_logger(__name__)
 
 
 class PlayerService(PlayerStatus):
-    """Gerencia a reprodução de áudio: download, playback e presença do bot."""
+    """Gerencia a reprodução de áudio: download, playback e presença do bot.
+
+    Lógica de status herdada de PlayerStatus.
+    """
 
     def __init__(
         self,
@@ -29,63 +32,6 @@ class PlayerService(PlayerStatus):
         self.repo = repo
         self.yt = yt
         self.playlist_svc = playlist_svc
-
-    # ------------------------------------------------------------------
-    # Presença / status
-    # ------------------------------------------------------------------
-
-    async def _atualizar_status(self, titulo: str, duracao: int) -> None:
-        bot = self.state.voice_bot
-        if not bot:
-            return
-        decorrido = formatar_duracao(self.state.tempo_decorrido())
-        total = formatar_duracao(duracao)
-        activity = discord.Activity(
-            type=discord.ActivityType.listening,
-            name=f'{titulo} [{decorrido}/{total}]',
-        )
-        try:
-            await bot.change_presence(activity=activity)
-        except Exception:
-            pass
-
-    async def _limpar_status(self) -> None:
-        bot = self.state.voice_bot
-        if not bot:
-            return
-        try:
-            await bot.change_presence(activity=None)
-        except Exception:
-            pass
-
-    async def _status_loop(self) -> None:
-        try:
-            while self.state.is_playing_voice:
-                titulo = self.state._status_titulo
-                duracao = self.state._playback_duracao
-                if titulo:
-                    await self._atualizar_status(titulo, duracao)
-                await asyncio.sleep(5)
-        except asyncio.CancelledError:
-            pass
-        finally:
-            await self._limpar_status()
-
-    def _iniciar_status_loop(self) -> None:
-        task = self.state._status_task
-        if task and not task.done():
-            task.cancel()
-        loop = (
-            self.state.voice_bot.loop
-            if self.state.voice_bot
-            else asyncio.get_event_loop()
-        )
-        self.state._status_task = loop.create_task(self._status_loop())
-
-    def _parar_status_loop(self) -> None:
-        task = self.state._status_task
-        if task and not task.done():
-            task.cancel()
 
     # ------------------------------------------------------------------
     # Reprodução
@@ -218,6 +164,13 @@ class PlayerService(PlayerStatus):
 
         vc.play(source, after=after_playing)
 
+        await self._enviar_embed_tocando(msg_carregando, video, total, st)
+        logger.info(f'[VOZ] Tocando: {titulo}')
+
+    async def _enviar_embed_tocando(self, msg, video: dict, total: int, st) -> None:
+        """Edita a mensagem de carregando para o embed de 'tocando agora'."""
+        titulo = video.get('titulo', 'Desconhecido')
+        video_url = video.get('embed_url', '')
         embed = discord.Embed(
             title='🔊 Tocando na Call',
             description=f'**[{titulo}]({video_url})**',
@@ -227,8 +180,8 @@ class PlayerService(PlayerStatus):
         embed.add_field(name='Duração', value=video.get('duracao_formatada', '??:??'), inline=True)
         embed.add_field(name='Posição', value=f'{st.playlist_index + 1}/{total}', inline=True)
         embed.add_field(name='Volume', value=f'{int(st.voice_volume * 100)}%', inline=True)
-        await msg_carregando.edit(embed=embed)
-        logger.info(f'[VOZ] Tocando: {titulo}')
+        await msg.edit(embed=embed)
+
 
     async def _auto_next(self, ctx) -> None:
         """Chamado automaticamente ao terminar uma música."""

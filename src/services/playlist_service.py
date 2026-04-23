@@ -8,19 +8,21 @@ from src.repositories.playlist_repository import PlaylistRepository
 from src.services.youtube_service import YouTubeService
 from src.services.spotify_service import SpotifyService
 from src.services.playlist_add import PlaylistAdd
+from src.services.playlist_add_bulk import PlaylistAddBulk
 from src.services.playlist_manage import PlaylistManage
+from src.services.playlist_nav import PlaylistNav
 
 logger = get_logger(__name__)
 
 
-class PlaylistService(PlaylistAdd, PlaylistManage):
-    """Façade principal: shuffle, navegação core e composição dos helpers de adição/gestão.
+class PlaylistService(PlaylistAdd, PlaylistAddBulk, PlaylistManage, PlaylistNav):
+    """Façade principal: shuffle, navegação core e composição dos helpers.
 
     Métodos herdados:
-      PlaylistAdd    → adicionar_por_url, adicionar_por_busca,
-                        adicionar_spotify, adicionar_playlist_youtube
-      PlaylistManage → remover_video, promover_video, limpar_playlist,
-                        pular_video, voltar_video
+      PlaylistAdd     → adicionar_por_url, adicionar_por_busca
+      PlaylistAddBulk → adicionar_spotify, adicionar_playlist_youtube
+      PlaylistManage  → remover_video, promover_video, limpar_playlist
+      PlaylistNav     → pular_video, voltar_video
     """
 
     def __init__(

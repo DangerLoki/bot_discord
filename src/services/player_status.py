@@ -64,3 +64,20 @@ class PlayerStatus:
         task = self.state._status_task
         if task and not task.done():
             task.cancel()
+
+
+    def _iniciar_status_loop(self) -> None:
+        task = self.state._status_task
+        if task and not task.done():
+            task.cancel()
+        loop = (
+            self.state.voice_bot.loop
+            if self.state.voice_bot
+            else asyncio.get_event_loop()
+        )
+        self.state._status_task = loop.create_task(self._status_loop())
+
+    def _parar_status_loop(self) -> None:
+        task = self.state._status_task
+        if task and not task.done():
+            task.cancel()
