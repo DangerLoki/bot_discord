@@ -1,5 +1,6 @@
 """Cog de gerenciamento da playlist — comandos de fila."""
 import random
+import urllib.parse
 
 import discord
 from discord.ext import commands
@@ -39,8 +40,23 @@ class PlaylistCog(commands.Cog, name='Playlist'):
             logger.info(f'[ADD SPOTIFY] {entrada} por {ctx.author}')
             await self.playlist_svc.adicionar_spotify(ctx, entrada, self.bot)
         elif entrada.startswith('http') and ('list=' in entrada or 'playlist' in entrada):
-            logger.info(f'[ADD PLAYLIST] {entrada} por {ctx.author}')
-            await self.playlist_svc.adicionar_playlist_youtube(ctx, entrada)
+            params = urllib.parse.parse_qs(urllib.parse.urlparse(entrada).query)
+            list_id = params.get('list', [''])[0]
+            if list_id.startswith('RD'):
+                # YouTube Mix — adiciona só o vídeo do link, ignora a fila gerada
+                video_id = params.get('v', [''])[0]
+                url_limpa = f'https://www.youtube.com/watch?v={video_id}' if video_id else entrada
+                logger.info(f'[ADD MIX→VIDEO] {url_limpa} por {ctx.author}')
+                await ctx.send(
+                    embed=discord.Embed(
+                        description='ℹ️ Links de Mix do YouTube adicionam apenas o vídeo selecionado, não a fila inteira.',
+                        color=0x5865F2,
+                    )
+                )
+                await self.playlist_svc.adicionar_por_url(ctx, url_limpa)
+            else:
+                logger.info(f'[ADD PLAYLIST] {entrada} por {ctx.author}')
+                await self.playlist_svc.adicionar_playlist_youtube(ctx, entrada)
         elif entrada.startswith('http'):
             logger.info(f'[ADD URL] {entrada} por {ctx.author}')
             await self.playlist_svc.adicionar_por_url(ctx, entrada)
@@ -55,6 +71,16 @@ class PlaylistCog(commands.Cog, name='Playlist'):
             await ctx.send(
                 '❌ Forneça uma URL de playlist do YouTube. '
                 'Exemplo: `&playlist https://www.youtube.com/playlist?list=XXXX`'
+            )
+            return
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        list_id = params.get('list', [''])[0]
+        if list_id.startswith('RD'):
+            await ctx.send(
+                embed=discord.Embed(
+                    description='❌ Links de **Mix** não são suportados no comando `&playlist`.\nUse `&add <url>` para adicionar apenas o vídeo do link.',
+                    color=0xED4245,
+                )
             )
             return
         logger.info(f'[ADD PLAYLIST] {url} por {ctx.author}')
