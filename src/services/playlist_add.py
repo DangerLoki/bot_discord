@@ -1,4 +1,4 @@
-"""Mixin: métodos de adição de vídeos à playlist."""
+"""Métodos de adição de vídeos à playlist."""
 import asyncio
 import time
 from datetime import datetime
@@ -11,8 +11,8 @@ from src.utils import embed_carregando, embed_erro, embed_aviso
 logger = get_logger(__name__)
 
 
-class PlaylistAddMixin:
-    """Mixin com todos os métodos de adição: URL, busca, Spotify e playlist YT."""
+class PlaylistAdd:
+    """Métodos de adição: URL, busca, Spotify e playlist YT."""
 
     # ------------------------------------------------------------------
     # Adição por URL direta

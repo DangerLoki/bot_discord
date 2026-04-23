@@ -6,7 +6,9 @@ Bot Discord para reprodução de áudio do YouTube em canais de voz, com gerenci
 
 - ✅ Reprodução de áudio do YouTube em canais de voz (yt-dlp + FFmpeg)
 - ✅ Adição por URL, ID ou busca de texto
-- ✅ Importação de playlists completas e YouTube Mix
+- ✅ Importação de playlists completas do YouTube
+- ✅ Links de YouTube Mix adicionam apenas o vídeo selecionado (não a fila gerada)
+- ✅ Lives bloqueadas — não é possível adicionar transmissões ao vivo
 - ✅ Integração Spotify — track, álbum e playlist (busca automaticamente no YouTube)
 - ✅ Gerenciamento de fila: remover, promover, limpar, paginar
 - ✅ Modo aleatório com `shuffle_id` único por sessão
@@ -32,9 +34,14 @@ src/
 │
 ├── services/
 │   ├── player_service.py       # Lógica de reprodução, presença e auto-next
-│   ├── playlist_service.py     # Add, remove, promote, shuffle, skip, voltar
-│   ├── youtube_service.py      # Busca, metadados e download de áudio (yt-dlp)
-│   └── spotify_service.py      # Track, álbum, playlist + fallback via embed
+│   ├── player_status.py        # Loop de status/presença herdado por PlayerService
+│   ├── playlist_service.py     # Shuffle, navegação e fachada da fila
+│   ├── playlist_add.py         # Adição: URL, busca, Spotify, playlist YT
+│   ├── playlist_manage.py      # Remoção, promoção, limpeza, pular/voltar
+│   ├── youtube_service.py      # Download e extração de playlist (yt-dlp)
+│   ├── youtube_search.py       # Metadados e busca textual herdados por YouTubeService
+│   ├── spotify_service.py      # Track, álbum, playlist (consultas)
+│   └── spotify_client.py       # Auth, requisições REST e fallback via embed HTML
 │
 ├── models/
 │   └── player_state.py         # Estado mutável do player (volume, índice, shuffle…)
@@ -42,10 +49,14 @@ src/
 ├── repositories/
 │   └── playlist_repository.py  # load() / save() do playlist.json
 │
-├── bot/
-│   ├── utils.py                # Helpers: extrair_video_id, embeds, formatar_duracao…
-│   └── ui/
-│       └── pagination.py       # View de paginação da playlist
+├── ui/
+│   └── pagination.py           # View de paginação da playlist
+│
+├── utils/
+│   ├── __init__.py             # Re-exporta todos os helpers
+│   ├── embeds.py               # embed_erro, embed_aviso, embed_sucesso, embed_carregando
+│   ├── formatters.py           # formatar_duracao, extrair_video_id, is_spotify_url…
+│   └── errors.py               # GeoBlockedError, _is_geo_blocked
 │
 └── logger.py                   # Configuração de logging (rotação, console, arquivo)
 

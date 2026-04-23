@@ -1,4 +1,4 @@
-"""Mixin: busca de metadados e pesquisa de vídeos no YouTube."""
+"""Busca de metadados e pesquisa de vídeos no YouTube."""
 import asyncio
 import time
 
@@ -10,8 +10,8 @@ from src.utils import GeoBlockedError, _is_geo_blocked, formatar_duracao
 logger = get_logger(__name__)
 
 
-class YouTubeSearchMixin:
-    """Mixin com opts base, busca por metadados e busca textual."""
+class YouTubeSearch:
+    """Opts base, busca por metadados e busca textual no YouTube."""
 
     # ------------------------------------------------------------------
     # Helpers internos

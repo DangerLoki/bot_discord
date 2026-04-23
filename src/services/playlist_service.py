@@ -7,20 +7,20 @@ from src.models.player_state import PlayerState
 from src.repositories.playlist_repository import PlaylistRepository
 from src.services.youtube_service import YouTubeService
 from src.services.spotify_service import SpotifyService
-from src.services.playlist_add_mixin import PlaylistAddMixin
-from src.services.playlist_manage_mixin import PlaylistManageMixin
+from src.services.playlist_add import PlaylistAdd
+from src.services.playlist_manage import PlaylistManage
 
 logger = get_logger(__name__)
 
 
-class PlaylistService(PlaylistAddMixin, PlaylistManageMixin):
-    """Fachada principal: shuffle, navegação core e composição dos mixins.
+class PlaylistService(PlaylistAdd, PlaylistManage):
+    """Façade principal: shuffle, navegação core e composição dos helpers de adição/gestão.
 
     Métodos herdados:
-      PlaylistAddMixin    → adicionar_por_url, adicionar_por_busca,
-                            adicionar_spotify, adicionar_playlist_youtube
-      PlaylistManageMixin → remover_video, promover_video, limpar_playlist,
-                            pular_video, voltar_video
+      PlaylistAdd    → adicionar_por_url, adicionar_por_busca,
+                        adicionar_spotify, adicionar_playlist_youtube
+      PlaylistManage → remover_video, promover_video, limpar_playlist,
+                        pular_video, voltar_video
     """
 
     def __init__(

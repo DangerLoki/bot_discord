@@ -1,4 +1,4 @@
-"""Mixin: remoção, promoção, limpeza e navegação da playlist."""
+"""Remoção, promoção, limpeza e navegação da playlist."""
 import asyncio
 
 import discord
@@ -9,8 +9,8 @@ from src.utils import extrair_video_id, embed_aviso, embed_erro
 logger = get_logger(__name__)
 
 
-class PlaylistManageMixin:
-    """Mixin com remoção, promoção, limpeza e paginação de navegação."""
+class PlaylistManage:
+    """Remoção, promoção, limpeza e navegação de vídeos na fila."""
 
     # ------------------------------------------------------------------
     # Remoção

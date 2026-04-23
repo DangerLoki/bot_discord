@@ -1,7 +1,7 @@
 """Estado mutável do player de áudio.
 
 Centraliza toda variável de runtime do player num único objeto,
-eliminando atributos espalhados por mixins.
+eliminando atributos espalhados por classes herdadas.
 """
 import asyncio
 import time

@@ -1,4 +1,4 @@
-"""Mixin: loop de status e presença do bot durante a reprodução."""
+"""Status e presença do bot durante a reprodução."""
 import asyncio
 
 import discord
@@ -9,8 +9,8 @@ from src.utils import formatar_duracao
 logger = get_logger(__name__)
 
 
-class PlayerStatusMixin:
-    """Mixin com loop de atualização de presença durante a reprodução."""
+class PlayerStatus:
+    """Loop de atualização de presença durante a reprodução."""
 
     async def _atualizar_status(self, titulo: str, duracao: int) -> None:
         bot = self.state.voice_bot

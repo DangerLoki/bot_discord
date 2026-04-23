@@ -9,13 +9,13 @@ from src.models.player_state import PlayerState
 from src.repositories.playlist_repository import PlaylistRepository
 from src.services.youtube_service import YouTubeService
 from src.services.playlist_service import PlaylistService
-from src.services.player_status_mixin import PlayerStatusMixin
+from src.services.player_status import PlayerStatus
 from src.utils import GeoBlockedError, formatar_duracao, embed_carregando, embed_erro, embed_aviso
 
 logger = get_logger(__name__)
 
 
-class PlayerService(PlayerStatusMixin):
+class PlayerService(PlayerStatus):
     """Gerencia a reprodução de áudio: download, playback e presença do bot."""
 
     def __init__(

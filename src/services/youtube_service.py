@@ -9,13 +9,13 @@ import yt_dlp
 
 from src.logger import get_logger
 from src.utils import GeoBlockedError, _is_geo_blocked, formatar_duracao
-from src.services.youtube_search_mixin import YouTubeSearchMixin
-# Métodos herdados do mixin: _base_opts, obter_info_video, buscar_videos
+from src.services.youtube_search import YouTubeSearch
+# Métodos herdados: _base_opts, obter_info_video, buscar_videos
 
 logger = get_logger(__name__)
 
 
-class YouTubeService(YouTubeSearchMixin):
+class YouTubeService(YouTubeSearch):
     """Busca metadados, realiza buscas e baixa áudio do YouTube."""
 
     def __init__(
