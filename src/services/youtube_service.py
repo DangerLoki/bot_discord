@@ -8,7 +8,7 @@ from pathlib import Path
 import yt_dlp
 
 from src.logger import get_logger
-from src.bot.utils import GeoBlockedError, _is_geo_blocked, formatar_duracao
+from src.utils import GeoBlockedError, _is_geo_blocked, formatar_duracao
 
 logger = get_logger(__name__)
 

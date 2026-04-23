@@ -7,7 +7,7 @@ from src.models.player_state import PlayerState
 from src.services.player_service import PlayerService
 from src.services.playlist_service import PlaylistService
 from src.repositories.playlist_repository import PlaylistRepository
-from src.bot.utils import embed_erro
+from src.utils import embed_erro
 
 logger = get_logger(__name__)
 

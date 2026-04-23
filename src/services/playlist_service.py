@@ -12,7 +12,7 @@ from src.models.player_state import PlayerState
 from src.repositories.playlist_repository import PlaylistRepository
 from src.services.youtube_service import YouTubeService
 from src.services.spotify_service import SpotifyService
-from src.bot.utils import extrair_video_id, embed_carregando, embed_erro, embed_aviso
+from src.utils import extrair_video_id, embed_carregando, embed_erro, embed_aviso
 
 logger = get_logger(__name__)
 

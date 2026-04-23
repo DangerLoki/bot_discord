@@ -35,8 +35,7 @@ class PaginacaoPlaylist(View):
                 descricao += f"**{pos}.** [{item['titulo']}]({item['embed_url']}){tocado_label}\n"
                 descricao += f"└ Por: {item['adicionado_por']} | ⏱️ {item['duracao_formatada']}\n\n"
             embed.description = descricao
-            
-            # Monta o footer com informações de paginação e shuffle_id se disponível
+
             footer_text = f"Página {self.pagina_atual + 1}/{self.total_paginas} | Total: {len(self.playlist)} vídeos"
             if self.playlist and self.playlist[0].get('shuffle_id'):
                 footer_text += f" | Shuffle ID: {self.playlist[0].get('shuffle_id')}"

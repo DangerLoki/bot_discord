@@ -8,7 +8,7 @@ from src.logger import get_logger
 from src.models.player_state import PlayerState
 from src.services.playlist_service import PlaylistService
 from src.repositories.playlist_repository import PlaylistRepository
-from src.bot.ui.pagination import PaginacaoPlaylist
+from src.ui.pagination import PaginacaoPlaylist
 
 logger = get_logger(__name__)
 
