@@ -40,10 +40,9 @@ class PlaylistNav:
             return
         st = self.state
         st.playlist_index = (st.playlist_index - 1) % len(playlist)
-        tentativas = 0
-        while tentativas < len(playlist) and playlist[st.playlist_index].get('tocado', False):
-            st.playlist_index = (st.playlist_index - 1) % len(playlist)
-            tentativas += 1
+        # Ao voltar, reseta o flag tocado para permitir reprodução
+        playlist[st.playlist_index]['tocado'] = False
+        self.repo.save(playlist)
         video = playlist[st.playlist_index]
         embed = discord.Embed(
             title='⏮️ Vídeo Anterior',

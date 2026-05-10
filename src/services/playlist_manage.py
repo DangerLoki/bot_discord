@@ -190,6 +190,7 @@ class PlaylistManage:
                 st.shuffle_playlist.pop(current_shuffle_pos)
                 st.shuffle_playlist.insert(next_shuffle_pos, index_video)
             nova_pos = next_shuffle_pos + 1
+            self.repo.save(playlist)  # garante salvamento também no modo shuffle
         else:
             next_index = (st.playlist_index + 1) % len(playlist)
             if index_video != next_index:
@@ -234,6 +235,10 @@ class PlaylistManage:
         total = len(playlist)
         self.repo.save([])
         self.state.playlist_index = 0
+        self.state.shuffle_mode = False
+        self.state.shuffle_playlist = []
+        self.state.shuffle_index = 0
+        self.state.shuffle_id = None
         logger.info(f'[CLEAR] Playlist limpa por {ctx.author}')
         embed = discord.Embed(
             title='🗑️ Playlist Limpa!',

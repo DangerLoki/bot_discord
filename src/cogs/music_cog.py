@@ -8,6 +8,7 @@ from src.services.player_service import PlayerService
 from src.services.playlist_service import PlaylistService
 from src.repositories.playlist_repository import PlaylistRepository
 from src.utils import embed_erro
+from src.models.player_state import RepeatMode
 
 logger = get_logger(__name__)
 
@@ -143,6 +144,40 @@ class MusicCog(commands.Cog, name='Música'):
         await ctx.send('🔁 Recomeçando música atual...')
         await self.player_svc.tocar_atual(ctx)
 
+    @commands.command(name='repetir', aliases=['repeat', 'loop'])
+    async def repetir(self, ctx, modo: str = None):
+        """Define o modo de repetição: `musica`, `playlist` ou `off`."""
+        modos_one = ('musica', 'music', '1', 'one', 'música')
+        modos_all = ('playlist', 'all', 'todos', 'tudo', 'p')
+        modos_off = ('off', 'não', 'nao', '0', 'desligar', 'none')
+
+        if modo is None:
+            # Cicla entre os modos: OFF -> ONE -> ALL -> OFF
+            cycle = {
+                RepeatMode.OFF: RepeatMode.ONE,
+                RepeatMode.ONE: RepeatMode.ALL,
+                RepeatMode.ALL: RepeatMode.OFF,
+            }
+            self.state.repeat_mode = cycle[self.state.repeat_mode]
+        elif modo.lower() in modos_one:
+            self.state.repeat_mode = RepeatMode.ONE
+        elif modo.lower() in modos_all:
+            self.state.repeat_mode = RepeatMode.ALL
+        elif modo.lower() in modos_off:
+            self.state.repeat_mode = RepeatMode.OFF
+        else:
+            await ctx.send(
+                '❌ Modo inválido. Use: `&repetir musica`, `&repetir playlist` ou `&repetir off`'
+            )
+            return
+
+        mensagens = {
+            RepeatMode.OFF: '⏹️ Repetição **desativada**.',
+            RepeatMode.ONE: '🔂 Repetindo a **música atual**.',
+            RepeatMode.ALL: '🔁 Repetindo a **playlist inteira**.',
+        }
+        await ctx.send(mensagens[self.state.repeat_mode])
+
     # ------------------------------------------------------------------
     # Volume
     # ------------------------------------------------------------------
@@ -239,8 +274,7 @@ class MusicCog(commands.Cog, name='Música'):
                 '`&skip` — Pula para o próximo\n'
                 '`&previous` — Volta ao anterior\n'
                 '`&recomecar` — Recomeça a música atual\n'
-                '`&aleatorio` — Liga/desliga modo aleatório 🔀\n'
-                '`&volume <0‑200>` — Ajusta o volume\n'
+                '`&aleatorio` — Liga/desliga modo aleatório 🔀\n'                '`&repetir` — Cicla: sem repetição / música 🔂 / playlist 🔁\n'                '`&volume <0‑200>` — Ajusta o volume\n'
                 '`&tocando` — Mostra o que está tocando'
             ),
             inline=False,

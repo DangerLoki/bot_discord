@@ -5,7 +5,7 @@ import time
 import discord
 
 from src.logger import get_logger
-from src.models.player_state import PlayerState
+from src.models.player_state import PlayerState, RepeatMode
 from src.repositories.playlist_repository import PlaylistRepository
 from src.services.youtube_service import YouTubeService
 from src.services.playlist_service import PlaylistService
@@ -70,8 +70,8 @@ class PlayerService(PlayerStatus):
             if st.playlist_index >= len(playlist):
                 st.playlist_index = 0
 
-            # Pula músicas já tocadas (modo sequencial)
-            if not st.shuffle_mode:
+            # Pula músicas já tocadas (modo sequencial), exceto em repeat ONE
+            if not st.shuffle_mode and st.repeat_mode != RepeatMode.ONE:
                 inicio = st.playlist_index
                 while playlist[st.playlist_index].get('tocado', False):
                     st.playlist_index = (st.playlist_index + 1) % len(playlist)
@@ -130,6 +130,10 @@ class PlayerService(PlayerStatus):
                 ):
                     st.playlist_index = (st.playlist_index + 1) % len(playlist)
                     tentativas += 1
+                if tentativas >= len(playlist):
+                    await ctx.send(embed=embed_aviso('📋 Nenhuma música disponível para tocar.'))
+                    st.is_playing_voice = False
+                    return
                 continue
             break
 
@@ -169,10 +173,16 @@ class PlayerService(PlayerStatus):
 
     async def _enviar_embed_tocando(self, msg, video: dict, total: int, st) -> None:
         """Edita a mensagem de carregando para o embed de 'tocando agora'."""
+        from src.models.player_state import RepeatMode
         titulo = video.get('titulo', 'Desconhecido')
         video_url = video.get('embed_url', '')
+        _repeat_icon = {
+            RepeatMode.OFF: '',
+            RepeatMode.ONE: ' 🔂',
+            RepeatMode.ALL: ' 🔁',
+        }.get(st.repeat_mode, '')
         embed = discord.Embed(
-            title='🔊 Tocando na Call',
+            title=f'🔊 Tocando na Call{_repeat_icon}',
             description=f'**[{titulo}]({video_url})**',
             color=0x1DB954,
         )
@@ -190,6 +200,11 @@ class PlayerService(PlayerStatus):
         if not st.is_playing_voice:
             return
 
+        # --- Repeat ONE: repete a música atual sem marcar como tocada ---
+        if st.repeat_mode == RepeatMode.ONE:
+            await self.tocar_atual(ctx)
+            return
+
         playlist = self.repo.load()
         if playlist and st.playlist_index < len(playlist):
             playlist[st.playlist_index]['tocado'] = True
@@ -205,6 +220,13 @@ class PlayerService(PlayerStatus):
         else:
             st.playlist_index += 1
             if st.playlist_index >= len(playlist):
+                if st.repeat_mode == RepeatMode.ALL:
+                    for v in playlist:
+                        v['tocado'] = False
+                    self.repo.save(playlist)
+                    st.playlist_index = 0
+                    await self.tocar_atual(ctx)
+                    return
                 st.playlist_index = 0
                 st.is_playing_voice = False
                 await ctx.send(
@@ -217,6 +239,13 @@ class PlayerService(PlayerStatus):
             ):
                 st.playlist_index += 1
             if st.playlist_index >= len(playlist):
+                if st.repeat_mode == RepeatMode.ALL:
+                    for v in playlist:
+                        v['tocado'] = False
+                    self.repo.save(playlist)
+                    st.playlist_index = 0
+                    await self.tocar_atual(ctx)
+                    return
                 st.playlist_index = 0
                 st.is_playing_voice = False
                 await ctx.send(

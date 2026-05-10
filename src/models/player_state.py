@@ -5,7 +5,14 @@ eliminando atributos espalhados por classes herdadas.
 """
 import asyncio
 import time
+from enum import Enum
 from typing import Optional
+
+
+class RepeatMode(Enum):
+    OFF = "off"          # sem repetição
+    ONE = "one"          # repete a música atual
+    ALL = "all"          # repete a playlist inteira
 
 
 class PlayerState:
@@ -19,6 +26,7 @@ class PlayerState:
 
         # Flags
         self.is_playing_voice: bool = False
+        self.repeat_mode: RepeatMode = RepeatMode.OFF
 
         # Navegação na playlist
         self.playlist_index: int = 0
