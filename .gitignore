@@ -1,10 +1,58 @@
-venv/
-data/playlist.json
-__pycache__/
+﻿# Configuracoes sensiveis
+config.env
 *.env
-*.json
+.env
+
+# Cookies (podem conter sessoes autenticadas)
+config/cookies.txt
+
+# Dados locais
+data/
+
+# Cache de audio/yt-dlp
+cache/
+.cache
+
+# Logs
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Ambientes virtuais
+.venv/
+venv/
+env/
+ENV/
+
+# Distribuicao / build
+dist/
+build/
+*.egg-info/
+*.egg
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Outros arquivos locais
 image.png
 melhorias.txt
-cache/
 run.fish
-.cache

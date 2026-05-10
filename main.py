@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sys
 from pathlib import Path
 
 import discord
@@ -7,6 +8,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from src.logger import setup_logging, get_logger
+from src.setup.cli_setup import run_setup, clear_token, check_ffmpeg, inject_ffmpeg_to_path
 from src.models.player_state import PlayerState
 from src.repositories.playlist_repository import PlaylistRepository
 from src.services.youtube_service import YouTubeService
@@ -21,6 +23,11 @@ BASE_DIR = Path(__file__).parent
 
 
 async def main() -> None:
+    # --- Configuração inicial (cria config.env se necessário) ---
+    inject_ffmpeg_to_path()
+    check_ffmpeg()
+    run_setup()
+
     # --- Configurações ---
     load_dotenv(BASE_DIR / 'config.env')
     token = os.getenv('token_discord')
@@ -74,7 +81,18 @@ async def main() -> None:
     await bot.add_cog(MusicCog(bot, **shared))
     await bot.add_cog(PlaylistCog(bot, **{k: v for k, v in shared.items() if k != 'player_svc'}))
 
-    await bot.start(token)
+    try:
+        await bot.start(token)
+    except discord.errors.LoginFailure:
+        print()
+        print(f"\033[1m\033[31m✖ Token do Discord inválido ou expirado.\033[0m")
+        print("  O token salvo será apagado. Informe o novo token abaixo.\n")
+        logger.error('[TOKEN] Token inválido. Limpando config.env e solicitando novo token.')
+        await bot.close()
+        clear_token()
+        run_setup(force=False)
+        print("\033[1m\033[32m↺ Reiniciando o bot...\033[0m\n")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 if __name__ == '__main__':
