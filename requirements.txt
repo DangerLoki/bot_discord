@@ -10,3 +10,4 @@ spotipy>=2.23.0
 
 # Utilitários
 python-dotenv>=1.0.0
+certifi>=2024.0.0

@@ -3,6 +3,14 @@ import os
 import sys
 from pathlib import Path
 
+# Garante que o bundle do PyInstaller encontre os certificados SSL
+try:
+    import certifi
+    os.environ.setdefault('SSL_CERT_FILE', certifi.where())
+    os.environ.setdefault('REQUESTS_CA_BUNDLE', certifi.where())
+except ImportError:
+    pass
+
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv

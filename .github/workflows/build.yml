@@ -30,8 +30,11 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Instalar dependências
-        run: pip install -r requirements.txt pyinstaller
+        run: uv pip install --system -r requirements.txt pyinstaller
 
       - name: Build Linux
         if: runner.os == 'Linux'
@@ -42,9 +45,12 @@ jobs:
             --hidden-import discord \
             --hidden-import discord.opus \
             --hidden-import discord.voice_client \
+            --hidden-import nacl \
             --hidden-import yt_dlp \
             --hidden-import spotipy \
+            --hidden-import certifi \
             --collect-all yt_dlp \
+            --collect-data certifi \
             main.py
 
       - name: Build Windows
@@ -56,9 +62,12 @@ jobs:
             --hidden-import discord `
             --hidden-import discord.opus `
             --hidden-import discord.voice_client `
+            --hidden-import nacl `
             --hidden-import yt_dlp `
             --hidden-import spotipy `
+            --hidden-import certifi `
             --collect-all yt_dlp `
+            --collect-data certifi `
             main.py
 
       - name: Upload artefato
