@@ -137,13 +137,25 @@ def inject_ffmpeg_to_path() -> None:
     """
     Se o ffmpeg não estiver no PATH do processo, localiza-o e injeta o
     diretório no os.environ["PATH"] para que discord.py e yt-dlp o encontrem.
+    Quando rodando dentro de um bundle PyInstaller, usa o ffmpeg embutido.
     """
+    import os
+
     if shutil.which("ffmpeg"):
         return  # Já acessível, nada a fazer
 
+    # Dentro do bundle PyInstaller: usa o ffmpeg embutido em sys._MEIPASS
+    if getattr(sys, "frozen", False):
+        import sys as _sys
+        meipass = Path(getattr(_sys, "_MEIPASS", ""))
+        ffmpeg_name = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+        bundled = meipass / ffmpeg_name
+        if bundled.exists():
+            os.environ["PATH"] = str(meipass) + os.pathsep + os.environ.get("PATH", "")
+            return
+
     ffmpeg_exe = _find_ffmpeg_path()
     if ffmpeg_exe:
-        import os
         bin_dir = str(ffmpeg_exe.parent)
         os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
 
