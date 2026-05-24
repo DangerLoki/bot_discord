@@ -33,7 +33,7 @@ class PlaylistCog(commands.Cog, name='Playlist'):
     # Adição
     # ------------------------------------------------------------------
 
-    @commands.command(name='add')
+    @commands.hybrid_command(name='add')
     async def add(self, ctx, *, entrada: str):
         """Adiciona um vídeo, playlist do YouTube ou URL do Spotify."""
         if 'open.spotify.com' in entrada:
@@ -64,7 +64,7 @@ class PlaylistCog(commands.Cog, name='Playlist'):
             logger.info(f'[ADD BUSCA] "{entrada}" por {ctx.author}')
             await self.playlist_svc.adicionar_por_busca(ctx, entrada, self.bot)
 
-    @commands.command(name='playlist', aliases=['pl', 'addplaylist'])
+    @commands.hybrid_command(name='playlist', aliases=['pl', 'addplaylist'])
     async def playlist_cmd(self, ctx, *, url: str):
         """Adiciona uma playlist inteira do YouTube."""
         if not url.startswith('http') or ('list=' not in url and 'playlist' not in url):
@@ -86,7 +86,7 @@ class PlaylistCog(commands.Cog, name='Playlist'):
         logger.info(f'[ADD PLAYLIST] {url} por {ctx.author}')
         await self.playlist_svc.adicionar_playlist_youtube(ctx, url)
 
-    @commands.command(name='spotify', aliases=['sp', 'addspotify'])
+    @commands.hybrid_command(name='spotify', aliases=['sp', 'addspotify'])
     async def spotify_cmd(self, ctx, *, url: str):
         """Adiciona uma faixa, álbum ou playlist do Spotify."""
         if 'open.spotify.com' not in url:
@@ -104,7 +104,7 @@ class PlaylistCog(commands.Cog, name='Playlist'):
     # Listagem
     # ------------------------------------------------------------------
 
-    @commands.command(name='listar')
+    @commands.hybrid_command(name='listar')
     async def listar(self, ctx):
         """Lista os vídeos da playlist (paginado)."""
         playlist = self.repo.load()
@@ -126,19 +126,19 @@ class PlaylistCog(commands.Cog, name='Playlist'):
     # Remoção / reordenação
     # ------------------------------------------------------------------
 
-    @commands.command(name='remove', aliases=['remover', 'rm', 'delete', 'rmid', 'deleteid', 'removeid'])
+    @commands.hybrid_command(name='remove', aliases=['remover', 'rm', 'delete', 'rmid', 'deleteid', 'removeid'])
     async def remove(self, ctx, *, entrada: str = None):
         """Remove um vídeo da playlist pela posição ou pelo ID/URL."""
         logger.info(f'[REMOVE] entrada="{entrada}" por {ctx.author} em #{ctx.channel}')
         await self.playlist_svc.remover_video(ctx, entrada)
 
-    @commands.command(name='promover', aliases=['promote', 'proxima', 'boost'])
+    @commands.hybrid_command(name='promover', aliases=['promote', 'proxima', 'boost'])
     async def promover(self, ctx, *, entrada: str = None):
         """Move um vídeo para ser o próximo a tocar."""
         logger.info(f'[PROMOTE] entrada="{entrada}" por {ctx.author} em #{ctx.channel}')
         await self.playlist_svc.promover_video(ctx, entrada, self.bot)
 
-    @commands.command(name='limpar', aliases=['clear', 'clearall', 'limpartudo'])
+    @commands.hybrid_command(name='limpar', aliases=['clear', 'clearall', 'limpartudo'])
     async def limpar(self, ctx):
         """Limpa toda a playlist."""
         logger.info(f'[CLEAR] por {ctx.author} em #{ctx.channel}')
@@ -148,7 +148,7 @@ class PlaylistCog(commands.Cog, name='Playlist'):
     # Shuffle
     # ------------------------------------------------------------------
 
-    @commands.command(name='aleatorio', aliases=['shuffle', 'random', 'embaralhar'])
+    @commands.hybrid_command(name='aleatorio', aliases=['shuffle', 'random', 'embaralhar'])
     async def aleatorio(self, ctx):
         """Liga/desliga o modo de reprodução aleatória."""
         await self.playlist_svc.toggle_shuffle(ctx)
@@ -157,16 +157,15 @@ class PlaylistCog(commands.Cog, name='Playlist'):
     # Diversão
     # ------------------------------------------------------------------
 
-    @commands.command(name='dado')
-    async def dado(self, ctx, lados: str = '20'):
+    @commands.hybrid_command(name='dado')
+    async def dado(self, ctx, lados: int = 20):
         """Lança um dado com N lados (padrão: d20)."""
-        lados_num = int(float(lados.replace(',', '.')))
-        if lados_num < 2:
+        if lados < 2:
             await ctx.send('O número de lados deve ser pelo menos 2.')
             return
-        resultado = random.randint(1, lados_num)
+        resultado = random.randint(1, lados)
         await ctx.send(
-            f'🎲 {ctx.author.mention} lançou um dado de {lados_num} lados e o resultado foi {resultado}'
+            f'🎲 {ctx.author.mention} lançou um dado de {lados} lados e o resultado foi {resultado}'
         )
 
 

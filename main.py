@@ -68,6 +68,11 @@ async def main() -> None:
     @bot.event
     async def on_ready():
         logger.info(f'Bot conectado como {bot.user} (ID: {bot.user.id})')
+        try:
+            synced = await bot.tree.sync()
+            logger.info(f'[SLASH] {len(synced)} slash command(s) sincronizados.')
+        except Exception as e:
+            logger.error(f'[SLASH] Erro ao sincronizar slash commands: {e}')
 
     # --- Cogs ---
     shared = dict(

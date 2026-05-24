@@ -66,7 +66,7 @@ class PlaylistManage:
                 index = next((i for i, v in enumerate(playlist) if v.get('video_id') == video_id), None)
 
         video_id = video.get('video_id')
-        titulo = video.get('titulo', 'Desconhecido')
+        titulo = video.get('titulo') or 'Desconhecido'
         removendo_atual = index == st.playlist_index
 
         playlist.pop(index)

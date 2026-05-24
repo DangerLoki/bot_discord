@@ -26,7 +26,7 @@ class PlaylistNav:
         video = playlist[st.playlist_index]
         embed = discord.Embed(
             title=label,
-            description=f"Próximo: [{video.get('titulo', 'Desconhecido')}]({video.get('embed_url', '#')})",
+            description=f"Próximo: [{video.get('titulo') or 'Desconhecido'}]({video.get('embed_url') or '#'})",
             color=0x00FF00,
         )
         embed.set_thumbnail(url=video.get('thumbnail_url', ''))
@@ -46,7 +46,7 @@ class PlaylistNav:
         video = playlist[st.playlist_index]
         embed = discord.Embed(
             title='⏮️ Vídeo Anterior',
-            description=f"Anterior: [{video.get('titulo', 'Desconhecido')}]({video.get('embed_url', '#')})",
+            description=f"Anterior: [{video.get('titulo') or 'Desconhecido'}]({video.get('embed_url') or '#'})",
             color=0x00FF00,
         )
         embed.set_thumbnail(url=video.get('thumbnail_url', ''))

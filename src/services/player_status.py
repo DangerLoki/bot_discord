@@ -1,5 +1,6 @@
 """Status e presença do bot durante a reprodução."""
 import asyncio
+from datetime import datetime, timezone, timedelta
 
 import discord
 
@@ -12,15 +13,19 @@ logger = get_logger(__name__)
 class PlayerStatus:
     """Loop de atualização de presença durante a reprodução."""
 
-    async def _atualizar_status(self, titulo: str, duracao: int) -> None:
+    async def _atualizar_status(self, titulo: str) -> None:
+        """Define a presença com start timestamp para o Discord calcular o tempo."""
         bot = self.state.voice_bot
         if not bot:
             return
-        decorrido = formatar_duracao(self.state.tempo_decorrido())
-        total = formatar_duracao(duracao)
+        decorrido = self.state.tempo_decorrido()
+        start = datetime.now(timezone.utc) - timedelta(seconds=decorrido)
+        duracao = self.state._playback_duracao
+        name = f'{titulo} [{formatar_duracao(duracao)}]' if duracao else titulo
         activity = discord.Activity(
             type=discord.ActivityType.listening,
-            name=f'{titulo} [{decorrido}/{total}]',
+            name=name,
+            start=start,
         )
         try:
             await bot.change_presence(activity=activity)
@@ -37,13 +42,16 @@ class PlayerStatus:
             pass
 
     async def _status_loop(self) -> None:
+        """Define a presença uma vez ao iniciar e refresca a cada 60s."""
         try:
+            titulo = self.state._status_titulo
+            if titulo:
+                await self._atualizar_status(titulo)
             while self.state.is_playing_voice:
+                await asyncio.sleep(60)
                 titulo = self.state._status_titulo
-                duracao = self.state._playback_duracao
-                if titulo:
-                    await self._atualizar_status(titulo, duracao)
-                await asyncio.sleep(5)
+                if self.state.is_playing_voice and titulo:
+                    await self._atualizar_status(titulo)
         except asyncio.CancelledError:
             pass
         finally:

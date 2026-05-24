@@ -8,7 +8,7 @@ from pathlib import Path
 import yt_dlp
 
 from src.logger import get_logger
-from src.utils import GeoBlockedError, _is_geo_blocked, formatar_duracao
+from src.utils import GeoBlockedError, BotBlockedError, _is_geo_blocked, _is_bot_blocked, formatar_duracao
 from src.services.youtube_search import YouTubeSearch
 # Métodos herdados: _base_opts, obter_info_video, buscar_videos
 
@@ -178,6 +178,8 @@ class YouTubeService(YouTubeSearch):
                 )
                 if _is_geo_blocked(str(e)):
                     raise GeoBlockedError(str(e))
+                if _is_bot_blocked(str(e)):
+                    raise BotBlockedError(str(e))
                 return None
 
         return await asyncio.to_thread(_download)

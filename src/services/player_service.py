@@ -10,7 +10,7 @@ from src.repositories.playlist_repository import PlaylistRepository
 from src.services.youtube_service import YouTubeService
 from src.services.playlist_service import PlaylistService
 from src.services.player_status import PlayerStatus
-from src.utils import GeoBlockedError, embed_carregando, embed_erro, embed_aviso
+from src.utils import GeoBlockedError, BotBlockedError, embed_carregando, embed_erro, embed_aviso
 
 logger = get_logger(__name__)
 
@@ -61,6 +61,7 @@ class PlayerService(PlayerStatus):
             st.is_playing_voice = False
             vc.stop()
 
+        falhas_consecutivas = 0
         while True:
             playlist = self.repo.load()
             if not playlist:
@@ -87,8 +88,8 @@ class PlayerService(PlayerStatus):
 
             video = playlist[st.playlist_index]
             total = len(playlist)
-            titulo = video.get('titulo', 'Desconhecido')
-            video_url = video.get('embed_url', '')
+            titulo = video.get('titulo') or 'Desconhecido'
+            video_url = video.get('embed_url') or ''
             video_id = video.get('video_id', '')
 
             msg_carregando = await ctx.send(embed=embed_carregando(f'🔄 Carregando **{titulo}**...'))
@@ -101,6 +102,15 @@ class PlayerService(PlayerStatus):
 
             try:
                 audio_path = await self.yt.baixar_audio(video_url, video_id)
+            except BotBlockedError:
+                await msg_carregando.edit(
+                    embed=embed_erro(
+                        '🤖 **YouTube está bloqueando os downloads** (detecção de bot).\n'
+                        'Configure o arquivo `config/cookies.txt` com cookies do YouTube.'
+                    )
+                )
+                st.is_playing_voice = False
+                return
             except GeoBlockedError:
                 await msg_carregando.edit(
                     embed=embed_erro(
@@ -119,6 +129,16 @@ class PlayerService(PlayerStatus):
                 continue
 
             if not audio_path:
+                falhas_consecutivas += 1
+                if falhas_consecutivas >= 3:
+                    await msg_carregando.edit(
+                        embed=embed_erro(
+                            '🤖 **YouTube está bloqueando os downloads** (detecção de bot).\n'
+                            'Configure o arquivo `config/cookies.txt` com cookies do YouTube.'
+                        )
+                    )
+                    st.is_playing_voice = False
+                    return
                 await msg_carregando.edit(
                     embed=embed_erro(f'❌ Não consegui baixar o áudio de **{titulo}**. Pulando...')
                 )
@@ -135,6 +155,7 @@ class PlayerService(PlayerStatus):
                     st.is_playing_voice = False
                     return
                 continue
+            falhas_consecutivas = 0
             break
 
         try:
@@ -174,8 +195,8 @@ class PlayerService(PlayerStatus):
     async def _enviar_embed_tocando(self, msg, video: dict, total: int, st) -> None:
         """Edita a mensagem de carregando para o embed de 'tocando agora'."""
         from src.models.player_state import RepeatMode
-        titulo = video.get('titulo', 'Desconhecido')
-        video_url = video.get('embed_url', '')
+        titulo = video.get('titulo') or 'Desconhecido'
+        video_url = video.get('embed_url') or ''
         _repeat_icon = {
             RepeatMode.OFF: '',
             RepeatMode.ONE: ' 🔂',

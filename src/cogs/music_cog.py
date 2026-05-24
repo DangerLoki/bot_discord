@@ -34,7 +34,7 @@ class MusicCog(commands.Cog, name='Música'):
     # Conexão
     # ------------------------------------------------------------------
 
-    @commands.command(name='entrar', aliases=['join', 'connect', 'entra'])
+    @commands.hybrid_command(name='entrar', aliases=['join', 'connect', 'entra'])
     async def entrar(self, ctx):
         """Bot entra no canal de voz do usuário."""
         if not ctx.author.voice:
@@ -55,7 +55,7 @@ class MusicCog(commands.Cog, name='Música'):
         await ctx.send(f'✅ Entrei em **{canal.name}**! Use `&tocar` para iniciar o áudio.')
         logger.info(f'[VOZ] Bot entrou em: {canal.name}')
 
-    @commands.command(name='sair', aliases=['leave', 'disconnect', 'dc'])
+    @commands.hybrid_command(name='sair', aliases=['leave', 'disconnect', 'dc'])
     async def sair(self, ctx):
         """Para o áudio e sai da call."""
         if self.state.voice_client:
@@ -73,7 +73,7 @@ class MusicCog(commands.Cog, name='Música'):
     # Reprodução
     # ------------------------------------------------------------------
 
-    @commands.command(name='tocar', aliases=['play', 'start'])
+    @commands.hybrid_command(name='tocar', aliases=['play', 'start'])
     async def tocar(self, ctx):
         """Começa a tocar o áudio da playlist na call."""
         if not self.state.voice_client or not self.state.voice_client.is_connected():
@@ -85,7 +85,7 @@ class MusicCog(commands.Cog, name='Música'):
                 return
         await self.player_svc.tocar_atual(ctx)
 
-    @commands.command(name='pausar', aliases=['pause'])
+    @commands.hybrid_command(name='pausar', aliases=['pause'])
     async def pausar(self, ctx):
         """Pausa o áudio."""
         if self.state.voice_client and self.state.voice_client.is_playing():
@@ -95,7 +95,7 @@ class MusicCog(commands.Cog, name='Música'):
         else:
             await ctx.send('❌ Nenhum áudio tocando.')
 
-    @commands.command(name='retomar', aliases=['resume', 'continuar'])
+    @commands.hybrid_command(name='retomar', aliases=['resume', 'continuar'])
     async def retomar(self, ctx):
         """Retoma o áudio pausado."""
         if self.state.voice_client and self.state.voice_client.is_paused():
@@ -105,7 +105,7 @@ class MusicCog(commands.Cog, name='Música'):
         else:
             await ctx.send('❌ Nenhum áudio pausado.')
 
-    @commands.command(name='parar', aliases=['stop'])
+    @commands.hybrid_command(name='parar', aliases=['stop'])
     async def parar(self, ctx):
         """Para o áudio sem sair da call."""
         if self.state.voice_client and (
@@ -118,7 +118,7 @@ class MusicCog(commands.Cog, name='Música'):
         else:
             await ctx.send('❌ Nenhum áudio tocando.')
 
-    @commands.command(name='skip', aliases=['pular', 'next'])
+    @commands.hybrid_command(name='skip', aliases=['pular', 'next'])
     async def skip(self, ctx):
         """Pula para o próximo vídeo."""
         logger.info(f'[SKIP] solicitado por {ctx.author} em #{ctx.channel}')
@@ -126,7 +126,7 @@ class MusicCog(commands.Cog, name='Música'):
         if self.state.voice_client and self.state.voice_client.is_connected():
             await self.player_svc.tocar_atual(ctx)
 
-    @commands.command(name='previous', aliases=['voltar', 'anterior'])
+    @commands.hybrid_command(name='previous', aliases=['voltar', 'anterior'])
     async def previous(self, ctx):
         """Volta ao vídeo anterior."""
         logger.info(f'[PREVIOUS] solicitado por {ctx.author} em #{ctx.channel}')
@@ -134,7 +134,7 @@ class MusicCog(commands.Cog, name='Música'):
         if self.state.voice_client and self.state.voice_client.is_connected():
             await self.player_svc.tocar_atual(ctx)
 
-    @commands.command(name='recomecar', aliases=['restart', 'replay', 'reiniciar'])
+    @commands.hybrid_command(name='recomecar', aliases=['restart', 'replay', 'reiniciar'])
     async def recomecar(self, ctx):
         """Recomeça a música atual do início."""
         logger.info(f'[RECOMECAR] solicitado por {ctx.author} em #{ctx.channel}')
@@ -182,31 +182,26 @@ class MusicCog(commands.Cog, name='Música'):
     # Volume
     # ------------------------------------------------------------------
 
-    @commands.command(name='volume', aliases=['vol', 'v'])
-    async def volume(self, ctx, valor: str = None):
+    @commands.hybrid_command(name='volume', aliases=['vol', 'v'])
+    async def volume(self, ctx, valor: int = None):
         """Ajusta o volume (0 a 200)."""
         if valor is None:
             porcentagem = int(self.state.voice_volume * 100)
             await ctx.send(f'🔉 Volume atual: **{porcentagem}%**')
             return
-        try:
-            valor_num = int(valor)
-        except ValueError:
-            await ctx.send('❌ Use um número entre 0 e 200. Ex: `&volume 80`')
-            return
-        if not 0 <= valor_num <= 200:
+        if not 0 <= valor <= 200:
             await ctx.send('❌ Volume deve ser entre **0** e **200**.')
             return
-        self.state.voice_volume = valor_num / 100.0
+        self.state.voice_volume = valor / 100.0
         if self.state.voice_client and self.state.voice_client.source:
             self.state.voice_client.source.volume = self.state.voice_volume
-        await ctx.send(f'🔉 Volume ajustado para **{valor_num}%**.')
+        await ctx.send(f'🔉 Volume ajustado para **{valor}%**.')
 
     # ------------------------------------------------------------------
     # Now Playing
     # ------------------------------------------------------------------
 
-    @commands.command(name='tocando', aliases=['np', 'nowplaying', 'atual'])
+    @commands.hybrid_command(name='tocando', aliases=['np', 'nowplaying', 'atual'])
     async def tocando(self, ctx):
         """Mostra o que está tocando na call."""
         vc = self.state.voice_client
@@ -227,7 +222,7 @@ class MusicCog(commands.Cog, name='Música'):
         status = '⏸️ Pausado' if vc.is_paused() else '▶️ Tocando'
         embed = discord.Embed(
             title=f'{status} na Call',
-            description=f"**[{video.get('titulo', 'Desconhecido')}]({video.get('embed_url', '#')})**",
+            description=f"**[{video.get('titulo') or 'Desconhecido'}]({video.get('embed_url') or '#'})**",
             color=0x1DB954,
         )
         embed.set_thumbnail(url=video.get('thumbnail_url', ''))
@@ -241,7 +236,7 @@ class MusicCog(commands.Cog, name='Música'):
     # Help
     # ------------------------------------------------------------------
 
-    @commands.command(name='help', aliases=['ajuda', 'comandos', 'cmds'])
+    @commands.hybrid_command(name='help', aliases=['ajuda', 'comandos', 'cmds'])
     async def help_cmd(self, ctx):
         """Lista todos os comandos disponíveis."""
         embed = discord.Embed(

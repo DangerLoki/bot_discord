@@ -59,7 +59,7 @@ async def resolver_entrada_por_titulo(ctx, bot, playlist: list, entrada: str):
     descricao = 'Encontrei mais de um resultado. Qual você quer promover?\n\n'
     for i in range(max_mostrar):
         _, video = candidatos[i]
-        descricao += f"{emojis[i]} **{video.get('titulo', 'Desconhecido')}**\n"
+        descricao += f"{emojis[i]} **{video.get('titulo') or 'Desconhecido'}**\n"
     descricao += '\nReaja com o número da opção desejada.'
     embed = discord.Embed(title='🔍 Múltiplos Resultados', description=descricao, color=0x5865F2)
     msg = await ctx.send(embed=embed)
