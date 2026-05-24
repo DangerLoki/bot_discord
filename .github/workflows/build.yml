@@ -45,11 +45,11 @@ jobs:
             --hidden-import discord \
             --hidden-import discord.opus \
             --hidden-import discord.voice_client \
-            --hidden-import nacl \
             --hidden-import yt_dlp \
             --hidden-import spotipy \
             --hidden-import certifi \
             --collect-all yt_dlp \
+            --collect-all PyNaCl \
             --collect-data certifi \
             main.py
 
@@ -62,11 +62,11 @@ jobs:
             --hidden-import discord `
             --hidden-import discord.opus `
             --hidden-import discord.voice_client `
-            --hidden-import nacl `
             --hidden-import yt_dlp `
             --hidden-import spotipy `
             --hidden-import certifi `
             --collect-all yt_dlp `
+            --collect-all PyNaCl `
             --collect-data certifi `
             main.py
 
