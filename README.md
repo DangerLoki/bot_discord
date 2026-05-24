@@ -1,8 +1,10 @@
+[![Build](https://github.com/DangerLoki/bot_discord/actions/workflows/build.yml/badge.svg)](https://github.com/DangerLoki/bot_discord/actions/workflows/build.yml)
+
 # Loki Bot — Discord Music Bot
 
 Bot Discord para reprodução de áudio do YouTube em canais de voz, com gerenciamento de playlist, modo aleatório com seed, integração Spotify e diagnóstico de performance.
 
-[![Build](https://github.com/DangerLoki/bot_discord/actions/workflows/build.yml/badge.svg)](https://github.com/DangerLoki/bot_discord/actions/workflows/build.yml)
+
 
 ## ⬇️ Download
 
