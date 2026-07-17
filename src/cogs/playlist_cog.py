@@ -138,6 +138,12 @@ class PlaylistCog(commands.Cog, name='Playlist'):
         logger.info(f'[PROMOTE] entrada="{entrada}" por {ctx.author} em #{ctx.channel}')
         await self.playlist_svc.promover_video(ctx, entrada, self.bot)
 
+    @commands.hybrid_command(name='inverter', aliases=['reverse', 'invert', 'flip'])
+    async def inverter(self, ctx):
+        """Inverte a ordem da playlist (primeira vira última e vice-versa)."""
+        logger.info(f'[INVERT] por {ctx.author} em #{ctx.channel}')
+        await self.playlist_svc.inverter_playlist(ctx)
+
     @commands.hybrid_command(name='limpar', aliases=['clear', 'clearall', 'limpartudo'])
     async def limpar(self, ctx):
         """Limpa toda a playlist."""

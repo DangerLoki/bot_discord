@@ -11,6 +11,15 @@ try:
 except ImportError:
     pass
 
+# DEBUG temporário — remove após confirmar que nacl funciona no binário
+try:
+    import nacl.secret
+    print(f'[DEBUG] nacl OK: {nacl.__version__}')
+except Exception as e:
+    import traceback
+    print(f'[DEBUG] nacl FALHOU: {type(e).__name__}: {e}')
+    traceback.print_exc()
+
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv

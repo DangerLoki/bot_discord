@@ -224,6 +224,48 @@ class PlaylistManage:
             await ctx.send(embed=embed)
 
     # ------------------------------------------------------------------
+    # Inversão
+    # ------------------------------------------------------------------
+
+    async def inverter_playlist(self, ctx) -> None:
+        playlist = self.repo.load()
+        if not playlist:
+            await ctx.send('⚠️ A playlist está vazia.')
+            return
+        if len(playlist) < 2:
+            await ctx.send('⚠️ A playlist precisa ter ao menos 2 músicas para ser invertida.')
+            return
+
+        st = self.state
+        total = len(playlist)
+
+        playlist.reverse()
+        for i, v in enumerate(playlist):
+            v['posicao'] = i + 1
+
+        # Ajusta o índice atual para apontar para a mesma música após a inversão.
+        # Se o bot não estiver tocando nada, reinicia do começo da nova ordem.
+        if st.is_playing_voice:
+            st.playlist_index = total - 1 - st.playlist_index
+        else:
+            st.playlist_index = 0
+
+        # Reconstrói a lista shuffle invertida se estiver ativa
+        if st.shuffle_mode and st.shuffle_playlist:
+            st.shuffle_playlist = [total - 1 - pos for pos in st.shuffle_playlist]
+
+        self.repo.save(playlist)
+        logger.info(f'[INVERT] Playlist invertida por {ctx.author}')
+
+        embed = discord.Embed(
+            title='🔃 Playlist Invertida!',
+            description=f'A ordem de **{total}** músicas foi invertida.\nA primeira virou a última e a última virou a primeira.',
+            color=0x5865F2,
+        )
+        embed.set_footer(text=f'Invertida por {ctx.author}')
+        await ctx.send(embed=embed)
+
+    # ------------------------------------------------------------------
     # Limpeza
     # ------------------------------------------------------------------
 
