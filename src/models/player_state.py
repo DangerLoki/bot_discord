@@ -46,6 +46,11 @@ class PlayerState:
         self._playback_duracao: int = 0
         self._status_titulo: str = ''
         self._status_task: Optional[asyncio.Task] = None
+        self._progress_task: Optional[asyncio.Task] = None
+
+        # Canal dedicado ao painel do player (comandos + status)
+        self.player_channel_id: Optional[int] = None
+        self._cleanup_task: Optional[asyncio.Task] = None
 
     # ------------------------------------------------------------------
     # Rastreio de tempo

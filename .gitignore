@@ -37,6 +37,7 @@ build/
 # pytest / coverage
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 
 # IDEs
@@ -56,3 +57,4 @@ desktop.ini
 image.png
 melhorias.txt
 run.fish
+METAS_PROJETO.md

@@ -1,5 +1,6 @@
 """Cliente de baixo nível para a API do Spotify e scraping do embed."""
 import re
+
 import requests as _requests
 
 from src.logger import get_logger

@@ -6,7 +6,7 @@ import discord
 
 from src.logger import get_logger
 from src.services.playlist_add_bulk import _registro_base
-from src.utils import embed_carregando, embed_erro, embed_aviso
+from src.utils import embed_aviso, embed_carregando, embed_erro
 
 logger = get_logger(__name__)
 

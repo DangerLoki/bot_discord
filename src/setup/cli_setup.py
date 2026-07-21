@@ -76,8 +76,8 @@ def clear_token() -> None:
         return
     lines = ENV_FILE.read_text(encoding="utf-8").splitlines(keepends=True)
     new_lines = [
-        (f"token_discord=\n" if l.strip().startswith("token_discord=") else l)
-        for l in lines
+        ("token_discord=\n" if linha.strip().startswith("token_discord=") else linha)
+        for linha in lines
     ]
     ENV_FILE.write_text("".join(new_lines), encoding="utf-8")
 
@@ -172,7 +172,7 @@ def check_ffmpeg() -> None:
     print(f"{_BOLD}{_YELLOW}⚠  ffmpeg não encontrado no PATH.{_RESET}")
     print(f"   O bot {_BOLD}não conseguirá reproduzir áudio{_RESET} sem ele.")
     print()
-    print(f"   Instale o ffmpeg e certifique-se de que está no PATH:")
+    print("   Instale o ffmpeg e certifique-se de que está no PATH:")
     print(f"   {_CYAN}https://ffmpeg.org/download.html{_RESET}")
     print()
 

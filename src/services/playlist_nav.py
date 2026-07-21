@@ -7,7 +7,7 @@ from src.utils import embed_erro
 class PlaylistNav:
     """Mixin: pular para o próximo vídeo e voltar ao anterior."""
 
-    async def pular_video(self, ctx) -> None:
+    async def pular_video(self, ctx, *, announce: bool = True) -> None:
         playlist = self.repo.load()
         if not playlist:
             await ctx.send(embed=embed_erro('❌ Playlist vazia.'))
@@ -23,17 +23,18 @@ class PlaylistNav:
                 st.playlist_index = (st.playlist_index + 1) % len(playlist)
                 tentativas += 1
             label = '⏭️ Vídeo Pulado'
-        video = playlist[st.playlist_index]
-        embed = discord.Embed(
-            title=label,
-            description=f"Próximo: [{video.get('titulo') or 'Desconhecido'}]({video.get('embed_url') or '#'})",
-            color=0x00FF00,
-        )
-        embed.set_thumbnail(url=video.get('thumbnail_url', ''))
-        embed.set_footer(text='O vídeo foi pulado com sucesso.')
-        await ctx.send(embed=embed)
+        if announce:
+            video = playlist[st.playlist_index]
+            embed = discord.Embed(
+                title=label,
+                description=f"Próximo: [{video.get('titulo') or 'Desconhecido'}]({video.get('embed_url') or '#'})",
+                color=0x00FF00,
+            )
+            embed.set_thumbnail(url=video.get('thumbnail_url', ''))
+            embed.set_footer(text='O vídeo foi pulado com sucesso.')
+            await ctx.send(embed=embed)
 
-    async def voltar_video(self, ctx) -> None:
+    async def voltar_video(self, ctx, *, announce: bool = True) -> None:
         playlist = self.repo.load()
         if not playlist:
             await ctx.send(embed=embed_erro('❌ Playlist vazia.'))
@@ -43,6 +44,8 @@ class PlaylistNav:
         # Ao voltar, reseta o flag tocado para permitir reprodução
         playlist[st.playlist_index]['tocado'] = False
         self.repo.save(playlist)
+        if not announce:
+            return
         video = playlist[st.playlist_index]
         embed = discord.Embed(
             title='⏮️ Vídeo Anterior',

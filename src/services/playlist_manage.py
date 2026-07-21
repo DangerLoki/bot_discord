@@ -227,39 +227,77 @@ class PlaylistManage:
     # Inversão
     # ------------------------------------------------------------------
 
-    async def inverter_playlist(self, ctx) -> None:
+    async def inverter_playlist(self, ctx, *, silencioso: bool = False) -> None:
         playlist = self.repo.load()
         if not playlist:
-            await ctx.send('⚠️ A playlist está vazia.')
-            return
-        if len(playlist) < 2:
-            await ctx.send('⚠️ A playlist precisa ter ao menos 2 músicas para ser invertida.')
+            if not silencioso:
+                await ctx.send('⚠️ A playlist está vazia.')
             return
 
         st = self.state
         total = len(playlist)
 
-        playlist.reverse()
+        if st.shuffle_mode and st.shuffle_playlist:
+            restante = st.shuffle_playlist[st.shuffle_index + 1:]
+            if len(restante) < 2:
+                if not silencioso:
+                    await ctx.send(
+                        '⚠️ É preciso ao menos 2 músicas restantes no modo aleatório para inverter.'
+                    )
+                return
+            restante.reverse()
+            st.shuffle_playlist[st.shuffle_index + 1:] = restante
+            logger.info(f'[INVERT] Ordem aleatória restante invertida por {ctx.author}')
+
+            if silencioso:
+                return
+
+            embed = discord.Embed(
+                title='🔃 Ordem Aleatória Invertida!',
+                description=f'A ordem das **{len(restante)}** próximas músicas do modo aleatório foi invertida.',
+                color=0x5865F2,
+            )
+            embed.set_footer(text=f'Invertida por {ctx.author}')
+            await ctx.send(embed=embed)
+            return
+
+        # Só invertemos as músicas ainda não tocadas — mantém o histórico
+        # (já tocado) intacto para não quebrar a sequência de reprodução.
+        indices_pendentes = [i for i, v in enumerate(playlist) if not v.get('tocado', False)]
+        if len(indices_pendentes) < 2:
+            if not silencioso:
+                await ctx.send(
+                    '⚠️ É preciso ao menos 2 músicas ainda não tocadas na fila para inverter.'
+                )
+            return
+
+        video_atual = playlist[st.playlist_index] if 0 <= st.playlist_index < total else None
+
+        videos_pendentes = [playlist[i] for i in indices_pendentes]
+        videos_pendentes.reverse()
+        for slot, video in zip(indices_pendentes, videos_pendentes):
+            playlist[slot] = video
         for i, v in enumerate(playlist):
             v['posicao'] = i + 1
 
-        # Ajusta o índice atual para apontar para a mesma música após a inversão.
-        # Se o bot não estiver tocando nada, reinicia do começo da nova ordem.
-        if st.is_playing_voice:
-            st.playlist_index = total - 1 - st.playlist_index
-        else:
-            st.playlist_index = 0
-
-        # Reconstrói a lista shuffle invertida se estiver ativa
-        if st.shuffle_mode and st.shuffle_playlist:
-            st.shuffle_playlist = [total - 1 - pos for pos in st.shuffle_playlist]
+        if video_atual is not None:
+            for i, v in enumerate(playlist):
+                if v is video_atual:
+                    st.playlist_index = i
+                    break
 
         self.repo.save(playlist)
-        logger.info(f'[INVERT] Playlist invertida por {ctx.author}')
+        logger.info(
+            f'[INVERT] Fila de músicas não tocadas invertida por {ctx.author} '
+            f'({len(indices_pendentes)} música(s))'
+        )
+
+        if silencioso:
+            return
 
         embed = discord.Embed(
-            title='🔃 Playlist Invertida!',
-            description=f'A ordem de **{total}** músicas foi invertida.\nA primeira virou a última e a última virou a primeira.',
+            title='🔃 Fila Invertida!',
+            description=f'A ordem das **{len(indices_pendentes)}** música(s) ainda não tocadas foi invertida.',
             color=0x5865F2,
         )
         embed.set_footer(text=f'Invertida por {ctx.author}')

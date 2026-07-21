@@ -1,11 +1,12 @@
 """Busca de metadados e pesquisa de vídeos no YouTube."""
 import asyncio
+import os
 import time
 
 import yt_dlp
 
 from src.logger import get_logger
-from src.utils import GeoBlockedError, _is_geo_blocked, formatar_duracao
+from src.utils import _is_geo_blocked, formatar_duracao
 
 logger = get_logger(__name__)
 
@@ -13,19 +14,38 @@ logger = get_logger(__name__)
 class YouTubeSearch:
     """Opts base, busca por metadados e busca textual no YouTube."""
 
+    def _has_valid_cookiefile(self) -> bool:
+        """Valida se o arquivo de cookies aparenta estar no formato Netscape."""
+        if not self.cookies_file or not os.path.exists(self.cookies_file):
+            return False
+
+        try:
+            with open(self.cookies_file, encoding='utf-8', errors='ignore') as fh:
+                head = ''.join([fh.readline() for _ in range(10)]).lower()
+        except OSError:
+            return False
+
+        valid = 'netscape http cookie file' in head
+        if not valid and not getattr(self, '_cookie_warned', False):
+            logger.warning(
+                '[YTDLP] cookies.txt ignorado: formato inválido. '
+                'Exporte novamente no formato Netscape.'
+            )
+            self._cookie_warned = True
+        return valid
+
     # ------------------------------------------------------------------
     # Helpers internos
     # ------------------------------------------------------------------
 
     def _base_opts(self, extra: dict | None = None) -> dict:
-        import os
         opts = {
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
             'js_runtimes': {'node': {}},
         }
-        if self.cookies_file and os.path.exists(self.cookies_file):
+        if self._has_valid_cookiefile():
             opts['cookiefile'] = self.cookies_file
         if self.proxy:
             opts['proxy'] = self.proxy

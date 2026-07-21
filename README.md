@@ -135,6 +135,51 @@ node --version
 
 ## 🚀 Como executar
 
+### Bootstrap inicial (Linux)
+
+Para preparar o ambiente do zero (venv, dependências, pastas e setup interativo):
+
+```bash
+chmod +x bootstrap.sh
+./bootstrap.sh
+```
+
+Se você usa Fish:
+
+```fish
+chmod +x bootstrap.fish
+./bootstrap.fish
+```
+
+Ao final, o script pergunta se você quer iniciar o bot no mesmo terminal.
+Se você abrir o `bootstrap.fish` por clique no gerenciador de arquivos, ele tenta abrir um terminal automaticamente e iniciar o bot.
+
+Opções úteis:
+
+```bash
+# Usar uma versão específica do Python
+PYTHON_BIN=python3.11 ./bootstrap.sh
+
+# Pular setup interativo (útil em CI)
+SKIP_SETUP=1 ./bootstrap.sh
+```
+
+No Fish, use:
+
+```fish
+env PYTHON_BIN=python3.11 ./bootstrap.fish
+env SKIP_SETUP=1 ./bootstrap.fish
+env RUN_BOT=1 ./bootstrap.fish
+env RUN_BOT=1 RUN_BOT_BG=1 ./bootstrap.fish
+```
+
+Para finalizar o bot (especialmente quando estiver em segundo plano):
+
+```fish
+chmod +x stop_bot.fish
+./stop_bot.fish
+```
+
 ### Opção 1 — Python direto
 
 ```bash

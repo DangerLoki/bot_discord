@@ -1,11 +1,12 @@
 """Serviço de integração com a API do Spotify."""
 import asyncio
-import re
 import time
+
 import requests as _requests
 
 from src.logger import get_logger
 from src.services.spotify_client import SpotifyAPIClient
+
 # Métodos herdados do cliente: _criar_cliente, _get, _tracks_via_embed,
 #                               extrair_tipo_id, is_spotify_url
 

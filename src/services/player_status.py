@@ -1,6 +1,6 @@
 """Status e presença do bot durante a reprodução."""
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 import discord
 

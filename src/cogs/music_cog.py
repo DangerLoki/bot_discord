@@ -1,14 +1,15 @@
 """Cog de reprodução de áudio — comandos de voz."""
+import asyncio
+
 import discord
 from discord.ext import commands
 
 from src.logger import get_logger
-from src.models.player_state import PlayerState
+from src.models.player_state import PlayerState, RepeatMode
+from src.repositories.config_repository import ConfigRepository
+from src.repositories.playlist_repository import PlaylistRepository
 from src.services.player_service import PlayerService
 from src.services.playlist_service import PlaylistService
-from src.repositories.playlist_repository import PlaylistRepository
-from src.utils import embed_erro
-from src.models.player_state import RepeatMode
 
 logger = get_logger(__name__)
 
@@ -23,12 +24,14 @@ class MusicCog(commands.Cog, name='Música'):
         player_svc: PlayerService,
         playlist_svc: PlaylistService,
         repo: PlaylistRepository,
+        config_repo: ConfigRepository,
     ) -> None:
         self.bot = bot
         self.state = state
         self.player_svc = player_svc
         self.playlist_svc = playlist_svc
         self.repo = repo
+        self.config_repo = config_repo
 
     # ------------------------------------------------------------------
     # Conexão
@@ -64,10 +67,57 @@ class MusicCog(commands.Cog, name='Música'):
             self.state.voice_client.stop()
             await self.state.voice_client.disconnect()
             self.state.voice_client = None
+            await self.player_svc.marcar_parado(ctx)
+            self.player_svc.reset_status_message()
             await ctx.send('📴 Saí da call.')
             logger.info('[VOZ] Bot saiu da call.')
         else:
             await ctx.send('❌ Não estou em nenhum canal.')
+
+    # ------------------------------------------------------------------
+    # Canal de comandos
+    # ------------------------------------------------------------------
+
+    @commands.hybrid_command(name='definircanal', aliases=['setcanal', 'canalbot'])
+    async def definircanal(self, ctx, canal: discord.TextChannel = None):
+        """Define em qual canal o bot aceita comandos (usa o canal atual se nenhum for informado)."""
+        if not ctx.guild:
+            await ctx.send('❌ Esse comando só funciona em um servidor.')
+            return
+
+        canal_alvo = canal or ctx.channel
+        self.state.player_channel_id = canal_alvo.id
+        self.config_repo.set_valor('player_channel_id', canal_alvo.id)
+        self.player_svc.reset_status_message()
+        self.player_svc.iniciar_limpeza_canal(canal_alvo)
+
+        await ctx.send(f'✅ Agora os comandos só são aceitos em {canal_alvo.mention}.')
+        logger.info(f'[CANAL] canal de comandos definido: #{canal_alvo.name} ({canal_alvo.id})')
+
+    @commands.hybrid_command(name='limparchat', aliases=['clearchat', 'purge'])
+    async def limparchat(self, ctx, quantidade: int = 50):
+        """Apaga as últimas mensagens do canal atual (padrão: 50, máx: 100)."""
+        if not ctx.guild:
+            await ctx.send('❌ Esse comando só funciona em um servidor.')
+            return
+
+        quantidade = max(1, min(quantidade, 100))
+        try:
+            apagadas = await ctx.channel.purge(limit=quantidade)
+        except discord.Forbidden:
+            await ctx.send('❌ Não tenho permissão para apagar mensagens neste canal.')
+            return
+        except discord.HTTPException as e:
+            await ctx.send(f'❌ Erro ao apagar mensagens: {e}')
+            return
+
+        aviso = await ctx.send(f'🧹 {len(apagadas)} mensagem(ns) apagada(s).')
+        logger.info(f'[LIMPARCHAT] {len(apagadas)} mensagens apagadas em #{ctx.channel} por {ctx.author}')
+        await asyncio.sleep(3)
+        try:
+            await aviso.delete()
+        except (discord.NotFound, discord.HTTPException):
+            pass
 
     # ------------------------------------------------------------------
     # Reprodução
@@ -91,7 +141,7 @@ class MusicCog(commands.Cog, name='Música'):
         if self.state.voice_client and self.state.voice_client.is_playing():
             self.state.voice_client.pause()
             self.state.pausar_rastreio()
-            await ctx.send('⏸️ Áudio pausado.')
+            await self.player_svc.atualizar_status_agora(ctx)
         else:
             await ctx.send('❌ Nenhum áudio tocando.')
 
@@ -101,7 +151,7 @@ class MusicCog(commands.Cog, name='Música'):
         if self.state.voice_client and self.state.voice_client.is_paused():
             self.state.voice_client.resume()
             self.state.retomar_rastreio()
-            await ctx.send('▶️ Áudio retomado.')
+            await self.player_svc.atualizar_status_agora(ctx)
         else:
             await ctx.send('❌ Nenhum áudio pausado.')
 
@@ -114,7 +164,7 @@ class MusicCog(commands.Cog, name='Música'):
             self.state.is_playing_voice = False
             self.player_svc._parar_status_loop()
             self.state.voice_client.stop()
-            await ctx.send('⏹️ Áudio parado.')
+            await self.player_svc.marcar_parado(ctx)
         else:
             await ctx.send('❌ Nenhum áudio tocando.')
 
@@ -122,8 +172,9 @@ class MusicCog(commands.Cog, name='Música'):
     async def skip(self, ctx):
         """Pula para o próximo vídeo."""
         logger.info(f'[SKIP] solicitado por {ctx.author} em #{ctx.channel}')
-        await self.playlist_svc.pular_video(ctx)
-        if self.state.voice_client and self.state.voice_client.is_connected():
+        connected = bool(self.state.voice_client and self.state.voice_client.is_connected())
+        await self.playlist_svc.pular_video(ctx, announce=not connected)
+        if connected:
             await self.player_svc.tocar_atual(ctx)
 
     @commands.hybrid_command(name='previous', aliases=['voltar', 'anterior'])
@@ -177,6 +228,7 @@ class MusicCog(commands.Cog, name='Música'):
             RepeatMode.ALL: '🔁 Repetindo a **playlist inteira**.',
         }
         await ctx.send(mensagens[self.state.repeat_mode])
+        await self.player_svc.atualizar_status_agora(ctx)
 
     # ------------------------------------------------------------------
     # Volume
@@ -196,6 +248,7 @@ class MusicCog(commands.Cog, name='Música'):
         if self.state.voice_client and self.state.voice_client.source:
             self.state.voice_client.source.volume = self.state.voice_volume
         await ctx.send(f'🔉 Volume ajustado para **{valor}%**.')
+        await self.player_svc.atualizar_status_agora(ctx)
 
     # ------------------------------------------------------------------
     # Now Playing
@@ -277,6 +330,14 @@ class MusicCog(commands.Cog, name='Música'):
         embed.add_field(
             name='🎲 Diversão',
             value='`&dado [lados]` — Lança um dado (padrão: d20)',
+            inline=False,
+        )
+        embed.add_field(
+            name='⚙️ Configuração',
+            value=(
+                '`&definircanal [#canal]` — Define onde os comandos são aceitos\n'
+                '`&limparchat [qtd]` — Apaga as últimas mensagens do canal'
+            ),
             inline=False,
         )
         embed.set_footer(

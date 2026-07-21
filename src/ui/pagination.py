@@ -1,5 +1,5 @@
 import discord
-from discord.ui import View, Button
+from discord.ui import Button, View
 
 
 class PaginacaoPlaylist(View):

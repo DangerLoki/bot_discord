@@ -1,5 +1,4 @@
 """Serviço para consultas e downloads via yt-dlp."""
-import os
 import asyncio
 import time
 import urllib.parse
@@ -8,8 +7,9 @@ from pathlib import Path
 import yt_dlp
 
 from src.logger import get_logger
-from src.utils import GeoBlockedError, BotBlockedError, _is_geo_blocked, _is_bot_blocked, formatar_duracao
 from src.services.youtube_search import YouTubeSearch
+from src.utils import BotBlockedError, GeoBlockedError, _is_bot_blocked, _is_geo_blocked, formatar_duracao
+
 # Métodos herdados: _base_opts, obter_info_video, buscar_videos
 
 logger = get_logger(__name__)
@@ -68,7 +68,7 @@ class YouTubeService(YouTubeSearch):
             }
             logger.debug(f'Extraindo playlist: {extract_url}')
 
-        if self.cookies_file and os.path.exists(self.cookies_file):
+        if self._has_valid_cookiefile():
             ydl_opts['cookiefile'] = self.cookies_file
 
         def _extract():
@@ -147,7 +147,7 @@ class YouTubeService(YouTubeSearch):
                 'preferredquality': '0',
             }],
         }
-        if self.cookies_file and os.path.exists(self.cookies_file):
+        if self._has_valid_cookiefile():
             opts['cookiefile'] = self.cookies_file
         if self.proxy:
             opts['proxy'] = self.proxy

@@ -5,12 +5,12 @@ import uuid
 from src.logger import get_logger
 from src.models.player_state import PlayerState
 from src.repositories.playlist_repository import PlaylistRepository
-from src.services.youtube_service import YouTubeService
-from src.services.spotify_service import SpotifyService
 from src.services.playlist_add import PlaylistAdd
 from src.services.playlist_add_bulk import PlaylistAddBulk
 from src.services.playlist_manage import PlaylistManage
 from src.services.playlist_nav import PlaylistNav
+from src.services.spotify_service import SpotifyService
+from src.services.youtube_service import YouTubeService
 
 logger = get_logger(__name__)
 
@@ -94,7 +94,7 @@ class PlaylistService(PlaylistAdd, PlaylistAddBulk, PlaylistManage, PlaylistNav)
     # Shuffle toggle
     # ------------------------------------------------------------------
 
-    async def toggle_shuffle(self, ctx) -> None:
+    async def toggle_shuffle(self, ctx, *, silencioso: bool = False) -> None:
         st = self.state
         st.shuffle_mode = not st.shuffle_mode
         if st.shuffle_mode:
@@ -105,21 +105,23 @@ class PlaylistService(PlaylistAdd, PlaylistAddBulk, PlaylistManage, PlaylistNav)
                 st.shuffle_playlist = nao_tocados
                 st.shuffle_index = 0
                 st.shuffle_id = str(uuid.uuid4())[:8]
-                await ctx.send(
-                    f'🔀 Modo aleatório **ativado**! (ID: `{st.shuffle_id}`) '
-                    f'Lista criada com {len(nao_tocados)} músicas.'
-                )
+                if not silencioso:
+                    await ctx.send(
+                        f'🔀 Modo aleatório **ativado**! (ID: `{st.shuffle_id}`) '
+                        f'Lista criada com {len(nao_tocados)} músicas.'
+                    )
             else:
                 indices = list(range(len(playlist)))
                 random.shuffle(indices)
                 st.shuffle_playlist = indices
                 st.shuffle_index = 0
                 st.shuffle_id = str(uuid.uuid4())[:8]
-                await ctx.send(
-                    f'🔀 Modo aleatório **ativado**! (ID: `{st.shuffle_id}`) '
-                    f'Todas as músicas foram resetadas e embaralhadas.'
-                )
-        else:
+                if not silencioso:
+                    await ctx.send(
+                        f'🔀 Modo aleatório **ativado**! (ID: `{st.shuffle_id}`) '
+                        f'Todas as músicas foram resetadas e embaralhadas.'
+                    )
+        elif not silencioso:
             await ctx.send('➡️ Modo aleatório **desativado**. Ordem normal retomada.')
         logger.info(
             f'[SHUFFLE] {"ON" if st.shuffle_mode else "OFF"} '
