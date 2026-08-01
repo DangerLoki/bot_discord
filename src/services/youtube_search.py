@@ -44,6 +44,7 @@ class YouTubeSearch:
             'no_warnings': True,
             'noplaylist': True,
             'js_runtimes': {'node': {}},
+            'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
         }
         if self._has_valid_cookiefile():
             opts['cookiefile'] = self.cookies_file

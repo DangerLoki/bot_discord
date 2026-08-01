@@ -36,6 +36,8 @@ class PlaylistService(PlaylistAdd, PlaylistAddBulk, PlaylistManage, PlaylistNav)
         self.yt = yt
         self.spotify = spotify
         self.state = state
+        self.player_svc = None  # setado externamente após a criação do PlayerService
+        self._cleanup_tasks: set = set()  # referências das tasks de limpeza pós-add
 
     # ------------------------------------------------------------------
     # Shuffle helpers

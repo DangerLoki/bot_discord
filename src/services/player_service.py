@@ -1,6 +1,7 @@
 """Lógica de reprodução de áudio em canal de voz."""
 import asyncio
 import time
+from pathlib import Path
 
 import discord
 
@@ -42,6 +43,8 @@ class PlayerService(PlayerStatus):
         self._playlist_msg: discord.Message | None = None
         self._current_video: dict | None = None
         self._current_total: int = 0
+        self._current_audio_path: str | None = None
+        self._preservar_cache_ao_parar: bool = False
         self._playlist_scroll: int = 0
         self.view = PlayerControlView(state, self, playlist_svc)
         self.queue_view = PlaylistQueueView(state, self, playlist_svc)
@@ -58,6 +61,8 @@ class PlayerService(PlayerStatus):
         self._status_msg = None
         self._playlist_msg = None
         self._current_video = None
+        self._current_audio_path = None
+        self.state.saiu_pausado = False
 
     def _painel_channel(self, ctx):
         """Retorna o canal dedicado do painel (se configurado) ou o canal do comando."""
@@ -370,6 +375,7 @@ class PlayerService(PlayerStatus):
                     return
                 continue
             falhas_consecutivas = 0
+            self._current_audio_path = audio_path
             break
 
         try:
@@ -378,6 +384,20 @@ class PlayerService(PlayerStatus):
         except Exception as e:
             await ctx.send(embed=embed_erro(f'❌ Erro ao criar stream de áudio: {e}'))
             return
+
+        st.iniciar_rastreio_tempo(video.get('duracao', 0) or 0)
+        await self._iniciar_reproducao(ctx, source, video, total)
+
+    async def _iniciar_reproducao(self, ctx, source, video: dict, total: int) -> None:
+        """Inicia a reprodução de `source` (já criado) e atualiza status/presença.
+
+        Usado tanto ao carregar uma faixa nova quanto ao retomar após reconectar
+        (`voltar_e_retomar`). Quem chama decide o rastreio de tempo antes (nova
+        faixa usa `iniciar_rastreio_tempo`, retomada usa `retomar_rastreio`).
+        """
+        st = self.state
+        vc = st.voice_client
+        titulo = video.get('titulo') or 'Desconhecido'
 
         st.is_playing_voice = True
         video_id_atual = video.get('video_id', '')
@@ -389,13 +409,15 @@ class PlayerService(PlayerStatus):
             )
         else:
             st._status_titulo = titulo
-        st.iniciar_rastreio_tempo(video.get('duracao', 0) or 0)
         self._iniciar_status_loop()
 
         def after_playing(error):
             if error:
                 logger.error(f'Erro no player: {error}')
-            self.yt.limpar_cache(video_id_atual)
+            if self._preservar_cache_ao_parar:
+                self._preservar_cache_ao_parar = False
+            else:
+                self.yt.limpar_cache(video_id_atual)
             if st.is_playing_voice and vc and vc.is_connected():
                 asyncio.run_coroutine_threadsafe(
                     self._auto_next(ctx), st.voice_bot.loop
@@ -405,6 +427,73 @@ class PlayerService(PlayerStatus):
 
         await self._enviar_embed_tocando(ctx, video, total, st)
         logger.info(f'[VOZ] Tocando: {titulo}')
+
+    # ------------------------------------------------------------------
+    # Pausar e sair da call / reconectar e retomar (botão ⏹️↔📞 do painel)
+    # ------------------------------------------------------------------
+
+    async def pausar_e_sair_da_call(self, ctx) -> None:
+        """Pausa a reprodução e desconecta da call, preservando o progresso
+        para retomar depois com `voltar_e_retomar`.
+        """
+        st = self.state
+        vc = st.voice_client
+        if not vc or not vc.is_connected():
+            return
+
+        if vc.is_playing():
+            vc.pause()
+        st.pausar_rastreio()
+        self._parar_progress_loop()
+        self._parar_status_loop()
+        st.saiu_pausado = True
+        self._preservar_cache_ao_parar = True
+        await vc.disconnect()
+        st.voice_client = None
+        await self.atualizar_status_agora(ctx)
+        logger.info('[VOZ] Bot pausou e saiu da call (botão do painel).')
+
+    async def voltar_e_retomar(self, ctx, canal) -> None:
+        """Reconecta o bot em `canal` e retoma a faixa que estava pausada."""
+        st = self.state
+        if not st.saiu_pausado or not self._current_video:
+            await ctx.send(embed=embed_erro('❌ Não há reprodução pausada para retomar.'))
+            return
+
+        video = self._current_video
+        total = self._current_total
+        audio_path = self._current_audio_path
+        if not audio_path or not Path(audio_path).exists():
+            audio_path = await self.yt.baixar_audio(
+                video.get('embed_url') or '', video.get('video_id', '')
+            )
+            if not audio_path:
+                st.saiu_pausado = False
+                await ctx.send(
+                    embed=embed_erro(
+                        f"❌ Não foi possível retomar **{video.get('titulo', '')}**: áudio indisponível."
+                    )
+                )
+                return
+            self._current_audio_path = audio_path
+
+        st.voice_client = await canal.connect()
+        st.voice_bot = getattr(ctx, 'bot', None) or st.voice_bot
+
+        elapsed = st.tempo_decorrido()
+        try:
+            source = discord.FFmpegPCMAudio(
+                audio_path, before_options=f'-ss {elapsed}' if elapsed else None
+            )
+            source = discord.PCMVolumeTransformer(source, volume=st.voice_volume)
+        except Exception as e:
+            await ctx.send(embed=embed_erro(f'❌ Erro ao retomar áudio: {e}'))
+            return
+
+        st.saiu_pausado = False
+        st.retomar_rastreio()
+        await self._iniciar_reproducao(ctx, source, video, total)
+        logger.info(f'[VOZ] Bot voltou para #{canal.name} e retomou a reprodução.')
 
     # ------------------------------------------------------------------
     # Card "tocando agora" — progresso, controles e atualização periódica
@@ -419,10 +508,14 @@ class PlayerService(PlayerStatus):
 
     def _construir_embed_tocando(self, video: dict, total: int, st) -> discord.Embed:
         """Monta o embed do player: progresso atual, faixa e informações de reprodução."""
+        self.view.sincronizar_estado(st)
         titulo = video.get('titulo') or 'Desconhecido'
         video_url = video.get('embed_url') or ''
-        pausado = bool(self.state.voice_client and self.state.voice_client.is_paused())
-        status_titulo = '⏸️ Pausado' if pausado else '▶️ Tocando na Call'
+        if st.saiu_pausado:
+            status_titulo = '📴 Pausado (bot fora da call)'
+        else:
+            pausado = bool(self.state.voice_client and self.state.voice_client.is_paused())
+            status_titulo = '⏸️ Pausado' if pausado else '▶️ Tocando na Call'
         _repeat_icon = {
             RepeatMode.OFF: '',
             RepeatMode.ONE: ' 🔂',
@@ -472,6 +565,9 @@ class PlayerService(PlayerStatus):
         """Atualiza o card de status para refletir que a reprodução foi parada."""
         self._parar_progress_loop()
         self._current_video = None
+        self._current_audio_path = None
+        self.state.saiu_pausado = False
+        self.view.sincronizar_estado(self.state)
         embed = embed_erro('⏹️ Reprodução parada.')
         try:
             await self._get_status_message(ctx, embed)

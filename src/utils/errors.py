@@ -25,6 +25,7 @@ _BOT_KEYWORDS = [
     'sign in to confirm',
     "confirm you're not a bot",
     'use --cookies-from-browser',
+    'http error 403',
 ]
 
 

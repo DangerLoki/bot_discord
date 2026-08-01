@@ -36,33 +36,7 @@ class PlaylistCog(commands.Cog, name='Playlist'):
     @commands.hybrid_command(name='add')
     async def add(self, ctx, *, entrada: str):
         """Adiciona um vídeo, playlist do YouTube ou URL do Spotify."""
-        if 'open.spotify.com' in entrada:
-            logger.info(f'[ADD SPOTIFY] {entrada} por {ctx.author}')
-            await self.playlist_svc.adicionar_spotify(ctx, entrada, self.bot)
-        elif entrada.startswith('http') and ('list=' in entrada or 'playlist' in entrada):
-            params = urllib.parse.parse_qs(urllib.parse.urlparse(entrada).query)
-            list_id = params.get('list', [''])[0]
-            if list_id.startswith('RD'):
-                # YouTube Mix — adiciona só o vídeo do link, ignora a fila gerada
-                video_id = params.get('v', [''])[0]
-                url_limpa = f'https://www.youtube.com/watch?v={video_id}' if video_id else entrada
-                logger.info(f'[ADD MIX→VIDEO] {url_limpa} por {ctx.author}')
-                await ctx.send(
-                    embed=discord.Embed(
-                        description='ℹ️ Links de Mix do YouTube adicionam apenas o vídeo selecionado, não a fila inteira.',
-                        color=0x5865F2,
-                    )
-                )
-                await self.playlist_svc.adicionar_por_url(ctx, url_limpa)
-            else:
-                logger.info(f'[ADD PLAYLIST] {entrada} por {ctx.author}')
-                await self.playlist_svc.adicionar_playlist_youtube(ctx, entrada)
-        elif entrada.startswith('http'):
-            logger.info(f'[ADD URL] {entrada} por {ctx.author}')
-            await self.playlist_svc.adicionar_por_url(ctx, entrada)
-        else:
-            logger.info(f'[ADD BUSCA] "{entrada}" por {ctx.author}')
-            await self.playlist_svc.adicionar_por_busca(ctx, entrada, self.bot)
+        await self.playlist_svc.adicionar_entrada(ctx, entrada, self.bot)
 
     @commands.hybrid_command(name='playlist', aliases=['pl', 'addplaylist'])
     async def playlist_cmd(self, ctx, *, url: str):

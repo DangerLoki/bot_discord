@@ -141,6 +141,7 @@ class YouTubeService(YouTubeSearch):
             'no_warnings': True,
             'noplaylist': True,
             'js_runtimes': {'node': {}},
+            'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'opus',

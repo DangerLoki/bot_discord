@@ -25,6 +25,34 @@ class _InteractionCtx:
         return await self.channel.send(*args, **kwargs)
 
 
+class AdicionarMusicaModal(discord.ui.Modal, title='Adicionar música'):
+    """Modal para adicionar música sem precisar digitar no chat (que é limpo
+    periodicamente). Aceita URL do YouTube/Spotify ou um termo de busca.
+    """
+
+    entrada = discord.ui.TextInput(
+        label='Link ou nome da música',
+        placeholder='Cole uma URL do YouTube/Spotify ou digite o nome da música...',
+        required=True,
+        max_length=500,
+    )
+
+    def __init__(self, playlist_svc) -> None:
+        super().__init__()
+        self.playlist_svc = playlist_svc
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        ctx = _InteractionCtx(interaction)
+        await self.playlist_svc.adicionar_entrada(ctx, self.entrada.value, interaction.client)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        logger.error(f'[ADD MODAL] erro ao processar entrada: {error}', exc_info=error)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await interaction.channel.send('❌ Ocorreu um erro ao adicionar a música. Tente novamente.')
+
+
 class PlayerControlView(discord.ui.View):
     """Botões persistentes equivalentes aos comandos de texto do player."""
 
@@ -40,6 +68,18 @@ class PlayerControlView(discord.ui.View):
             await interaction.response.defer()
         except discord.HTTPException:
             pass
+
+    def sincronizar_estado(self, state) -> None:
+        """Ajusta a aparência do botão de stop conforme o estado atual:
+        ⏹️ para pausar e sair da call, 📞 para voltar e retomar quando já
+        estiver pausado e fora da call.
+        """
+        if state.saiu_pausado:
+            self.parar.emoji = '📞'
+            self.parar.style = discord.ButtonStyle.success
+        else:
+            self.parar.emoji = '⏹️'
+            self.parar.style = discord.ButtonStyle.danger
 
     # ------------------------------------------------------------------
     # Linha 1 — transporte
@@ -81,12 +121,15 @@ class PlayerControlView(discord.ui.View):
     @discord.ui.button(emoji='⏹️', style=discord.ButtonStyle.danger, custom_id='player:stop', row=0)
     async def parar(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._ack(interaction)
-        vc = self.state.voice_client
-        if vc and (vc.is_playing() or vc.is_paused()):
-            self.state.is_playing_voice = False
-            self.player_svc._parar_status_loop()
-            vc.stop()
-        await self.player_svc.marcar_parado(_InteractionCtx(interaction))
+        ctx = _InteractionCtx(interaction)
+        if self.state.saiu_pausado:
+            canal_voz = interaction.user.voice.channel if interaction.user.voice else None
+            if not canal_voz:
+                await ctx.send('❌ Você precisa estar em um canal de voz para me trazer de volta.')
+                return
+            await self.player_svc.voltar_e_retomar(ctx, canal_voz)
+        else:
+            await self.player_svc.pausar_e_sair_da_call(ctx)
 
     # ------------------------------------------------------------------
     # Linha 2 — modos e volume
@@ -162,3 +205,8 @@ class PlaylistQueueView(discord.ui.View):
     async def proxima_pagina(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._ack(interaction)
         await self.player_svc.mudar_pagina_playlist(_InteractionCtx(interaction), 1)
+
+    @discord.ui.button(emoji='➕', style=discord.ButtonStyle.success, custom_id='playlist:add', row=1)
+    async def adicionar(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        # Não usa _ack aqui: abrir um modal precisa ser a resposta inicial da interação.
+        await interaction.response.send_modal(AdicionarMusicaModal(self.playlist_svc))

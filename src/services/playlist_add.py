@@ -1,6 +1,7 @@
 """Métodos de adição de vídeos à playlist (URL e busca)."""
 import asyncio
 import time
+import urllib.parse
 
 import discord
 
@@ -13,6 +14,71 @@ logger = get_logger(__name__)
 
 class PlaylistAdd:
     """Métodos de adição: URL direta e busca por texto."""
+
+    # ------------------------------------------------------------------
+    # Limpeza pós-confirmação
+    # ------------------------------------------------------------------
+
+    def _agendar_limpeza_confirmacao(self, ctx, msg, delay: float = 10.0) -> None:
+        """Agenda em background a remoção da mensagem de confirmação de adição
+        após `delay` segundos, e a atualização da mensagem de fila do painel.
+
+        Roda como task separada para não bloquear o comando que adicionou o vídeo.
+        """
+        task = asyncio.create_task(self._limpar_confirmacao_apos_delay(ctx, msg, delay))
+        self._cleanup_tasks.add(task)
+        task.add_done_callback(self._cleanup_tasks.discard)
+
+    async def _limpar_confirmacao_apos_delay(self, ctx, msg, delay: float) -> None:
+        await asyncio.sleep(delay)
+        try:
+            await msg.delete()
+        except (discord.NotFound, discord.HTTPException):
+            pass
+        player_svc = getattr(self, 'player_svc', None)
+        if player_svc:
+            playlist = self.repo.load()
+            await player_svc._atualizar_mensagem_playlist(ctx, playlist, self.state.playlist_index)
+
+    # ------------------------------------------------------------------
+    # Dispatch — decide o tipo de entrada (vídeo, playlist, Spotify, busca)
+    # ------------------------------------------------------------------
+
+    async def adicionar_entrada(self, ctx, entrada: str, bot) -> None:
+        """Ponto único de entrada para o comando/botão de adicionar música.
+
+        Detecta se `entrada` é uma URL do Spotify, uma playlist/mix do
+        YouTube, uma URL de vídeo único ou um termo de busca, e delega
+        para o método apropriado.
+        """
+        entrada = entrada.strip()
+        if 'open.spotify.com' in entrada:
+            logger.info(f'[ADD SPOTIFY] {entrada} por {ctx.author}')
+            await self.adicionar_spotify(ctx, entrada, bot)
+        elif entrada.startswith('http') and ('list=' in entrada or 'playlist' in entrada):
+            params = urllib.parse.parse_qs(urllib.parse.urlparse(entrada).query)
+            list_id = params.get('list', [''])[0]
+            if list_id.startswith('RD'):
+                # YouTube Mix — adiciona só o vídeo do link, ignora a fila gerada
+                video_id = params.get('v', [''])[0]
+                url_limpa = f'https://www.youtube.com/watch?v={video_id}' if video_id else entrada
+                logger.info(f'[ADD MIX→VIDEO] {url_limpa} por {ctx.author}')
+                await ctx.send(
+                    embed=discord.Embed(
+                        description='ℹ️ Links de Mix do YouTube adicionam apenas o vídeo selecionado, não a fila inteira.',
+                        color=0x5865F2,
+                    )
+                )
+                await self.adicionar_por_url(ctx, url_limpa)
+            else:
+                logger.info(f'[ADD PLAYLIST] {entrada} por {ctx.author}')
+                await self.adicionar_playlist_youtube(ctx, entrada)
+        elif entrada.startswith('http'):
+            logger.info(f'[ADD URL] {entrada} por {ctx.author}')
+            await self.adicionar_por_url(ctx, entrada)
+        else:
+            logger.info(f'[ADD BUSCA] "{entrada}" por {ctx.author}')
+            await self.adicionar_por_busca(ctx, entrada, bot)
 
     # ------------------------------------------------------------------
     # Adição por URL direta
@@ -93,6 +159,7 @@ class PlaylistAdd:
             embed.add_field(name='Posição na Playlist', value=str(registro['posicao']), inline=True)
         embed.set_footer(text='Vídeo adicionado com sucesso! ✅')
         await msg.edit(embed=embed)
+        self._agendar_limpeza_confirmacao(ctx, msg)
 
     # ------------------------------------------------------------------
     # Adição por busca

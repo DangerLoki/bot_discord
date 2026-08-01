@@ -123,6 +123,7 @@ async def main() -> None:
     state.player_channel_id = config_repo.load().get('player_channel_id')
     playlist_svc = PlaylistService(repo=repo, yt=yt, spotify=spotify, state=state)
     player_svc = PlayerService(state=state, repo=repo, yt=yt, playlist_svc=playlist_svc)
+    playlist_svc.player_svc = player_svc
 
     # Retoma da última posição não tocada
     playlist_svc.encontrar_proxima_nao_tocada()
@@ -195,6 +196,27 @@ async def main() -> None:
                 pass
             return
         if isinstance(error, commands.CommandNotFound):
+            return
+        if isinstance(error, commands.MissingRequiredArgument):
+            nome_comando = ctx.command.qualified_name if ctx.command else '?'
+            try:
+                aviso = await ctx.send(
+                    f'❌ Faltou informar `{error.param.name}`. '
+                    f'Uso: `&{nome_comando} <{error.param.name}>`'
+                )
+            except discord.HTTPException:
+                return
+            await asyncio.sleep(6)
+            try:
+                await aviso.delete()
+            except (discord.NotFound, discord.HTTPException):
+                pass
+            return
+        if isinstance(error, commands.UserInputError):
+            try:
+                await ctx.send(f'❌ {error}')
+            except discord.HTTPException:
+                pass
             return
         logger.error(f'[COMANDO] erro não tratado: {error}', exc_info=error)
 

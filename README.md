@@ -23,6 +23,10 @@ Baixe o binário da última versão na página de [Releases](https://github.com/
 
 - ✅ Reprodução de áudio do YouTube em canais de voz (yt-dlp + FFmpeg)
 - ✅ Comandos com prefixo `&` e slash commands (`/`) sincronizados automaticamente
+- ✅ Painel de player com botões persistentes (play/pause, skip, anterior, shuffle, repeat, volume, parar/voltar)
+- ✅ Botão ➕ na mensagem da fila abre um modal para adicionar música sem precisar digitar no chat
+- ✅ Botão de parar funciona como toggle: pausa e sai da call (⏹️) / volta ao canal de quem clicou e retoma de onde parou (📞)
+- ✅ Mensagens de confirmação de adição (única ou em lote) se auto-apagam após 10s e atualizam a fila
 - ✅ Adição por URL, ID ou busca de texto
 - ✅ Importação de playlists completas do YouTube
 - ✅ Links de YouTube Mix adicionam apenas o vídeo selecionado (não a fila gerada)
@@ -35,7 +39,8 @@ Baixe o binário da última versão na página de [Releases](https://github.com/
 - ✅ Detecção automática da primeira música não tocada ao reiniciar
 - ✅ Controle de volume em tempo real
 - ✅ Detecção e remoção automática de vídeos com geo-bloqueio
-- ✅ Detecção de bot-block do YouTube com parada automática e mensagem de erro
+- ✅ Detecção de bot-block do YouTube (incluindo HTTP 403) com parada automática e mensagem de erro
+- ✅ Mensagens amigáveis para erros de uso de comando (argumento faltando, entrada inválida)
 - ✅ Cache local com limpeza automática após reprodução
 - ✅ Suporte a proxy e cookies personalizados
 - ✅ Setup interativo do token via CLI na primeira execução

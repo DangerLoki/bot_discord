@@ -28,6 +28,10 @@ class PlayerState:
         self.is_playing_voice: bool = False
         self.repeat_mode: RepeatMode = RepeatMode.OFF
 
+        # Pausado e fora da call (botão ⏹️/📞 do painel): a reprodução foi
+        # pausada e o bot desconectou, aguardando alguém trazê-lo de volta.
+        self.saiu_pausado: bool = False
+
         # Navegação na playlist
         self.playlist_index: int = 0
 
