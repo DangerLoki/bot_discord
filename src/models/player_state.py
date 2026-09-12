@@ -16,9 +16,11 @@ class RepeatMode(Enum):
 
 
 class PlayerState:
-    """Único ponto de verdade sobre o estado atual da reprodução."""
+    """Único ponto de verdade sobre o estado atual da reprodução - por servidor (guild)."""
 
-    def __init__(self) -> None:
+    def __init__(self, guild_id: int) -> None:
+        self.guild_id = guild_id
+
         # Voice
         self.voice_client = None
         self.voice_bot = None
@@ -55,6 +57,31 @@ class PlayerState:
         # Canal dedicado ao painel do player (comandos + status)
         self.player_channel_id: Optional[int] = None
         self._cleanup_task: Optional[asyncio.Task] = None
+
+    def to_dict(self) -> dict:
+        """Serializa estado persistível para dict."""
+        return {
+            'voice_volume': self.voice_volume,
+            'repeat_mode': self.repeat_mode.value,
+            'playlist_index': self.playlist_index,
+            'shuffle_mode': self.shuffle_mode,
+            'shuffle_index': self.shuffle_index,
+            'shuffle_id': self.shuffle_id,
+            'player_channel_id': self.player_channel_id,
+        }
+
+    def from_dict(self, data: dict) -> None:
+        """Restaura estado a partir de dict."""
+        if data is None:
+            return
+        self.voice_volume = data.get('voice_volume', 0.25)
+        repeat_str = data.get('repeat_mode', 'off')
+        self.repeat_mode = RepeatMode(repeat_str)
+        self.playlist_index = data.get('playlist_index', 0)
+        self.shuffle_mode = data.get('shuffle_mode', False)
+        self.shuffle_index = data.get('shuffle_index', 0)
+        self.shuffle_id = data.get('shuffle_id')
+        self.player_channel_id = data.get('player_channel_id')
 
     # ------------------------------------------------------------------
     # Rastreio de tempo

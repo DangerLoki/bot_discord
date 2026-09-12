@@ -37,7 +37,7 @@ class PlaylistAdd:
             pass
         player_svc = getattr(self, 'player_svc', None)
         if player_svc:
-            playlist = self.repo.load()
+            playlist = self.repo.load(self.state.guild_id)
             await player_svc._atualizar_mensagem_playlist(ctx, playlist, self.state.playlist_index)
 
     # ------------------------------------------------------------------
@@ -96,7 +96,7 @@ class PlaylistAdd:
         embed_url = f'https://www.youtube.com/watch?v={video_id}'
         thumbnail_url = f'https://img.youtube.com/vi/{video_id}/hqdefault.jpg'
 
-        playlist = self.repo.load()
+        playlist = self.repo.load(self.state.guild_id)
         if any(item['video_id'] == video_id for item in playlist):
             _send = msg.edit if msg else ctx.send
             await _send(embed=embed_aviso('⚠️ Este vídeo já está na playlist.'))
@@ -136,7 +136,7 @@ class PlaylistAdd:
             extra={'posicao': len(playlist) + 1, 'url': url},
         )
         playlist.append(registro)
-        self.repo.save(playlist)
+        self.repo.save(self.state.guild_id, playlist)
         self._atualizar_shuffle_com_novo_video(len(playlist) - 1)
 
         elapsed = time.perf_counter() - t0

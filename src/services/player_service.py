@@ -14,6 +14,7 @@ from src.services.youtube_service import YouTubeService
 from src.ui.player_controls import PlayerControlView, PlaylistQueueView
 from src.utils import BotBlockedError, GeoBlockedError, embed_aviso, embed_carregando, embed_erro
 from src.utils.formatters import formatar_duracao
+from src.utils.retry import retry_async
 
 logger = get_logger(__name__)
 DOWNLOAD_TIMEOUT_SECONDS = 35
@@ -161,7 +162,7 @@ class PlayerService(PlayerStatus):
 
     async def mudar_pagina_playlist(self, ctx, delta: int) -> None:
         """Rola a mensagem da fila para frente/trás em blocos de `PLAYLIST_MSG_LIMITE`."""
-        playlist = self.repo.load()
+        playlist = self.repo.load(self.state.guild_id)
         if not playlist:
             return
         novo_inicio = self._playlist_scroll + delta * PLAYLIST_MSG_LIMITE
@@ -169,6 +170,24 @@ class PlayerService(PlayerStatus):
             playlist, self.state.playlist_index, inicio=novo_inicio
         )
         await self._get_playlist_message(ctx, embed)
+
+    async def _baixar_audio_com_retry(self, video_url: str, video_id: str) -> str | None:
+        """Tenta baixar áudio com retry automático em falhas transientes."""
+        try:
+            audio_path = await retry_async(
+                self.yt.baixar_audio,
+                max_retries=2,
+                initial_delay=1.0,
+                max_delay=10.0,
+                video_url=video_url,
+                video_id=video_id,
+            )
+            return audio_path
+        except (BotBlockedError, GeoBlockedError):
+            raise
+        except Exception as e:
+            logger.error(f'[DOWNLOAD] falha após retry: {type(e).__name__}: {e}')
+            return None
 
 
     async def _preparar_canal_painel(self, ctx) -> None:
@@ -253,7 +272,7 @@ class PlayerService(PlayerStatus):
 
         falhas_consecutivas = 0
         while True:
-            playlist = self.repo.load()
+            playlist = self.repo.load(self.state.guild_id)
             if not playlist:
                 await ctx.send(embed=embed_erro('❌ Playlist vazia. Adicione vídeos com `&add`.'))
                 return
@@ -292,11 +311,11 @@ class PlayerService(PlayerStatus):
                 posicao_shuffle = st.shuffle_index + 1
                 playlist[st.playlist_index]['shuffle_id'] = st.shuffle_id
                 playlist[st.playlist_index]['posicao_shuffle'] = posicao_shuffle
-            self.repo.save(playlist)
+            self.repo.save(self.state.guild_id, playlist)
 
             try:
                 audio_path = await asyncio.wait_for(
-                    self.yt.baixar_audio(video_url, video_id),
+                    self._baixar_audio_com_retry(video_url, video_id),
                     timeout=DOWNLOAD_TIMEOUT_SECONDS,
                 )
             except BotBlockedError:
@@ -314,11 +333,11 @@ class PlayerService(PlayerStatus):
                         f'🌍 **{titulo}** está bloqueado na sua região e foi removido da playlist.'
                     )
                 )
-                playlist = self.repo.load()
+                playlist = self.repo.load(self.state.guild_id)
                 playlist = [v for v in playlist if v.get('video_id') != video_id]
                 for i, v in enumerate(playlist):
                     v['posicao'] = i + 1
-                self.repo.save(playlist)
+                self.repo.save(self.state.guild_id, playlist)
                 if not playlist:
                     await ctx.send(embed=embed_aviso('📋 Playlist vazia após remoção.'))
                     return
@@ -617,10 +636,10 @@ class PlayerService(PlayerStatus):
             await self.tocar_atual(ctx)
             return
 
-        playlist = self.repo.load()
+        playlist = self.repo.load(self.state.guild_id)
         if playlist and st.playlist_index < len(playlist):
             playlist[st.playlist_index]['tocado'] = True
-            self.repo.save(playlist)
+            self.repo.save(self.state.guild_id, playlist)
 
         if not playlist:
             st.is_playing_voice = False
@@ -635,7 +654,7 @@ class PlayerService(PlayerStatus):
                 if st.repeat_mode == RepeatMode.ALL:
                     for v in playlist:
                         v['tocado'] = False
-                    self.repo.save(playlist)
+                    self.repo.save(self.state.guild_id, playlist)
                     st.playlist_index = 0
                     await self.tocar_atual(ctx)
                     return
@@ -654,7 +673,7 @@ class PlayerService(PlayerStatus):
                 if st.repeat_mode == RepeatMode.ALL:
                     for v in playlist:
                         v['tocado'] = False
-                    self.repo.save(playlist)
+                    self.repo.save(self.state.guild_id, playlist)
                     st.playlist_index = 0
                     await self.tocar_atual(ctx)
                     return

@@ -1,3 +1,4 @@
+from src.utils.cache_manager import CacheManager
 from src.utils.embeds import embed_aviso, embed_carregando, embed_erro, embed_sucesso
 from src.utils.errors import BotBlockedError, GeoBlockedError, _is_bot_blocked, _is_geo_blocked
 from src.utils.formatters import (
@@ -6,6 +7,8 @@ from src.utils.formatters import (
     formatar_duracao,
     is_spotify_url,
 )
+from src.utils.healthcheck import HealthCheck
+from src.utils.retry import retry_async
 
 __all__ = [
     "GeoBlockedError",
@@ -20,4 +23,7 @@ __all__ = [
     "embed_erro",
     "embed_aviso",
     "embed_sucesso",
+    "CacheManager",
+    "HealthCheck",
+    "retry_async",
 ]

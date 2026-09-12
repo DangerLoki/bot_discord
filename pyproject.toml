@@ -26,9 +26,13 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+asyncio_mode = "auto"
+addopts = "-p no:warnings"
+markers = [
+    "asyncio: marks tests as async (deselect with '-m \"not asyncio\"')",
+]
 
 [tool.ruff]
 line-length = 110

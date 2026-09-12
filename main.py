@@ -34,6 +34,7 @@ from src.services.playlist_service import PlaylistService
 from src.services.spotify_service import SpotifyService
 from src.services.youtube_service import YouTubeService
 from src.setup.cli_setup import check_ffmpeg, clear_token, inject_ffmpeg_to_path, run_setup
+from src.utils.cache_manager import CacheManager
 
 setup_logging()
 logger = get_logger(__name__)
@@ -67,9 +68,13 @@ def _acquire_single_instance_lock() -> None:
         except ValueError:
             existing_pid = 0
 
+        # Se existe PID stale (processo morto), remove o arquivo e continua
         if existing_pid and existing_pid != current_pid and _pid_exists(existing_pid):
             print(f'[ERRO] Bot já está em execução (PID: {existing_pid}).')
             raise SystemExit(1)
+        elif existing_pid and not _pid_exists(existing_pid):
+            logger.info(f'[LOCK] Removendo lock stale de processo morto (PID: {existing_pid})')
+            LOCK_FILE.unlink(missing_ok=True)
 
     LOCK_FILE.write_text(str(current_pid), encoding='utf-8')
 
@@ -106,27 +111,54 @@ async def main() -> None:
     else:
         logger.info('[SPOTIFY] não configurado (spotify_client_id ausente).')
 
-    # --- Infra ---
+    # --- Infra (Multi-Guild) ---
     cache_dir = BASE_DIR / 'cache'
     cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_mgr = CacheManager(cache_dir)
     cookies_file = str(BASE_DIR / 'config' / 'cookies.txt')
-    json_playlist = str(BASE_DIR / 'data' / 'playlist.json')
-    json_config = str(BASE_DIR / 'data' / 'bot_config.json')
+    data_dir = str(BASE_DIR / 'data')
 
-    repo = PlaylistRepository(json_playlist)
-    config_repo = ConfigRepository(json_config)
+    repo = PlaylistRepository(data_dir)
+    config_repo = ConfigRepository(data_dir)
     yt = YouTubeService(cache_dir=cache_dir, cookies_file=cookies_file, proxy=proxy)
     spotify = SpotifyService(client_id=spotify_client_id, client_secret=spotify_client_secret)
 
-    # --- Estado e serviços ---
-    state = PlayerState()
-    state.player_channel_id = config_repo.load().get('player_channel_id')
-    playlist_svc = PlaylistService(repo=repo, yt=yt, spotify=spotify, state=state)
-    player_svc = PlayerService(state=state, repo=repo, yt=yt, playlist_svc=playlist_svc)
-    playlist_svc.player_svc = player_svc
+    # --- Dicionário de Estados por Servidor (Multi-Guild) ---
+    guild_states: dict[int, PlayerState] = {}
+    guild_services: dict[int, tuple] = {}  # (playlist_svc, player_svc)
 
-    # Retoma da última posição não tocada
-    playlist_svc.encontrar_proxima_nao_tocada()
+    def get_or_create_guild_services(guild_id: int):
+        """Cria ou retorna serviços para um servidor."""
+        if guild_id in guild_services:
+            return guild_services[guild_id]
+
+        # Cria novo estado para este servidor
+        state = PlayerState(guild_id)
+        config = config_repo.load(guild_id)
+        state.player_channel_id = config.get('player_channel_id')
+        state.from_dict(config.get('player_state'))
+        guild_states[guild_id] = state
+
+        # Cria serviços para este servidor
+        playlist_svc = PlaylistService(repo=repo, yt=yt, spotify=spotify, state=state, cache_mgr=cache_mgr)
+        player_svc = PlayerService(state=state, repo=repo, yt=yt, playlist_svc=playlist_svc)
+        playlist_svc.player_svc = player_svc
+
+        # Limpa cache orfão
+        playlist = repo.load(guild_id)
+        video_ids = {v.get('video_id') for v in playlist if v.get('video_id')}
+        cache_mgr.cleanup_orphaned_files(guild_id, video_ids)
+
+        # Retoma última posição não tocada
+        playlist_svc.encontrar_proxima_nao_tocada()
+
+        guild_services[guild_id] = (playlist_svc, player_svc)
+        logger.info(f'[GUILD:{guild_id}] Serviços inicializados')
+        return playlist_svc, player_svc
+
+    # Log de cache total
+    cache_size = cache_mgr.get_cache_size_mb()
+    logger.info(f'[CACHE] Tamanho total: {cache_size:.1f}MB')
 
     # --- Bot ---
     intents = discord.Intents.default()
@@ -139,7 +171,9 @@ async def main() -> None:
             return True
         if not ctx.guild:
             return True
-        if ctx.channel.id == state.player_channel_id:
+        # Pega estado do servidor específico
+        guild_state = guild_states.get(ctx.guild.id)
+        if guild_state and ctx.channel.id == guild_state.player_channel_id:
             return True
         raise ComandoForaDoPainelError()
 
@@ -154,29 +188,67 @@ async def main() -> None:
         except Exception as e:
             logger.error(f'[SLASH] Erro ao sincronizar slash commands: {e}')
 
+        # Registra views persistentes para todos os servidores (uma vez)
         if not getattr(bot, '_painel_view_registrada', False):
-            bot.add_view(player_svc.view)
-            bot.add_view(player_svc.queue_view)
+            # Pega primeira guild para registrar views (funciona para todas)
+            if guild_services:
+                _, player_svc = next(iter(guild_services.values()))
+                bot.add_view(player_svc.view)
+                bot.add_view(player_svc.queue_view)
             bot._painel_view_registrada = True
             logger.info('[PAINEL] views persistentes de controles registradas.')
 
-        if state.player_channel_id:
-            canal = bot.get_channel(state.player_channel_id)
-            if canal:
-                player_svc.iniciar_limpeza_canal(canal)
-                logger.info(
-                    f'[CANAL] retomando canal de comandos salvo: #{canal.name} ({canal.id})'
-                )
-            else:
-                logger.warning(
-                    f'[CANAL] canal salvo (ID {state.player_channel_id}) não encontrado.'
-                )
+        # Inicializa canais de painel para todos os servidores
+        for guild_id, (_, player_svc) in guild_services.items():
+            state = guild_states[guild_id]
+            if state.player_channel_id:
+                canal = bot.get_channel(state.player_channel_id)
+                if canal:
+                    player_svc.iniciar_limpeza_canal(canal)
+                    logger.info(
+                        f'[GUILD:{guild_id}] retomando canal de comandos: #{canal.name} ({canal.id})'
+                    )
+                else:
+                    logger.warning(
+                        f'[GUILD:{guild_id}] canal salvo (ID {state.player_channel_id}) não encontrado.'
+                    )
+
+    async def _persist_all_states() -> None:
+        """Persiste estado de todos os servidores ao desconectar."""
+        try:
+            for guild_id, state in guild_states.items():
+                config = config_repo.load(guild_id)
+                config['player_state'] = state.to_dict()
+                await config_repo.save_async(guild_id, config)
+            logger.info('[STATE] estado de todos os servidores persistido')
+        except Exception as e:
+            logger.error(f'[STATE] erro ao persistir estados: {e}')
+
+    @bot.event
+    async def on_disconnect():
+        """Persiste estado quando bot desconecta do Discord."""
+        await _persist_all_states()
+
+    # Persiste estado ao desligar normalmente (via SIGTERM/SIGINT)
+    def _persist_all_states_sync() -> None:
+        """Versão síncrona para handlers de shutdown - persiste todos os servidores."""
+        try:
+            for guild_id, state in guild_states.items():
+                config = config_repo.load(guild_id)
+                config['player_state'] = state.to_dict()
+                config_repo.save(guild_id, config)
+            logger.info('[STATE] estado de todos os servidores persistido (shutdown)')
+        except Exception as e:
+            logger.error(f'[STATE] erro ao persistir estados no shutdown: {e}')
+
+    atexit.register(_persist_all_states_sync)
 
     @bot.event
     async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
         if isinstance(error, ComandoForaDoPainelError):
-            if state.player_channel_id:
-                texto = f'❌ Use os comandos no canal <#{state.player_channel_id}>.'
+            guild_state = guild_states.get(ctx.guild.id)
+            if guild_state and guild_state.player_channel_id:
+                texto = f'❌ Use os comandos no canal <#{guild_state.player_channel_id}>.'
             else:
                 texto = '❌ Primeiro defina o canal de comandos com `&definircanal`.'
             try:
@@ -221,16 +293,27 @@ async def main() -> None:
         logger.error(f'[COMANDO] erro não tratado: {error}', exc_info=error)
 
     # --- Cogs ---
+    # Shared para cogs (multi-guild)
     shared = dict(
-        state=state,
         repo=repo,
-        playlist_svc=playlist_svc,
-        player_svc=player_svc,
+        config_repo=config_repo,
+        get_or_create_guild_services=get_or_create_guild_services,
+        guild_states=guild_states,
     )
+    from src.cogs.diagnostic_cog import DiagnosticCog
     from src.cogs.music_cog import MusicCog
     from src.cogs.playlist_cog import PlaylistCog
-    await bot.add_cog(MusicCog(bot, config_repo=config_repo, **shared))
-    await bot.add_cog(PlaylistCog(bot, **{k: v for k, v in shared.items() if k != 'player_svc'}))
+
+    await bot.add_cog(MusicCog(bot, **shared))
+    await bot.add_cog(PlaylistCog(bot, **shared))
+    await bot.add_cog(
+        DiagnosticCog(
+            bot,
+            cache_dir=cache_dir,
+            cookies_file=cookies_file,
+            spotify_svc=spotify,
+        )
+    )
 
     try:
         await bot.start(token)

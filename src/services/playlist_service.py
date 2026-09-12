@@ -31,13 +31,24 @@ class PlaylistService(PlaylistAdd, PlaylistAddBulk, PlaylistManage, PlaylistNav)
         yt: YouTubeService,
         spotify: SpotifyService,
         state: PlayerState,
+        cache_mgr=None,
     ) -> None:
         self.repo = repo
         self.yt = yt
         self.spotify = spotify
         self.state = state
+        self.cache_mgr = cache_mgr
         self.player_svc = None  # setado externamente após a criação do PlayerService
         self._cleanup_tasks: set = set()  # referências das tasks de limpeza pós-add
+
+    def _cleanup_orphaned_cache(self) -> None:
+        """Limpa arquivos de cache que não estão mais na playlist."""
+        if not self.cache_mgr:
+            return
+        guild_id = self.state.guild_id
+        playlist = self.repo.load(guild_id)
+        video_ids = {v.get('video_id') for v in playlist if v.get('video_id')}
+        self.cache_mgr.cleanup_orphaned_files(guild_id, video_ids)
 
     # ------------------------------------------------------------------
     # Shuffle helpers
@@ -65,7 +76,7 @@ class PlaylistService(PlaylistAdd, PlaylistAddBulk, PlaylistManage, PlaylistNav)
             else:
                 for v in playlist:
                     v['tocado'] = False
-                self.repo.save(playlist)
+                self.repo.save(self.state.guild_id, playlist)
                 indices = list(range(len(playlist)))
                 random.shuffle(indices)
                 st.shuffle_playlist = indices
@@ -78,7 +89,7 @@ class PlaylistService(PlaylistAdd, PlaylistAddBulk, PlaylistManage, PlaylistNav)
 
     def encontrar_proxima_nao_tocada(self) -> None:
         """Define playlist_index na primeira música não tocada ao iniciar."""
-        playlist = self.repo.load()
+        playlist = self.repo.load(self.state.guild_id)
         if not playlist:
             self.state.playlist_index = 0
             return
@@ -100,7 +111,7 @@ class PlaylistService(PlaylistAdd, PlaylistAddBulk, PlaylistManage, PlaylistNav)
         st = self.state
         st.shuffle_mode = not st.shuffle_mode
         if st.shuffle_mode:
-            playlist = self.repo.load()
+            playlist = self.repo.load(self.state.guild_id)
             nao_tocados = [i for i, v in enumerate(playlist) if not v.get('tocado', False)]
             if nao_tocados:
                 random.shuffle(nao_tocados)

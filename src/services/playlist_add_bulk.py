@@ -100,7 +100,7 @@ class PlaylistAddBulk:
             await msg.edit(embed=embed_carregando(texto_inicial))
 
         adicionados, falhas = 0, 0
-        playlist = self.repo.load()
+        playlist = self.repo.load(self.state.guild_id)
         ids_existentes = {v['video_id'] for v in playlist}
         novos_indices = []
 
@@ -144,7 +144,7 @@ class PlaylistAddBulk:
                 logger.error(f'[SPOTIFY] Erro ao adicionar faixa "{termo}": {e}')
                 falhas += 1
 
-        self.repo.save(playlist)
+        self.repo.save(self.state.guild_id, playlist)
         for idx in novos_indices:
             self._atualizar_shuffle_com_novo_video(idx)
 
@@ -169,7 +169,7 @@ class PlaylistAddBulk:
             )
             return
 
-        playlist = self.repo.load()
+        playlist = self.repo.load(self.state.guild_id)
         ids_existentes = {v['video_id'] for v in playlist}
         tipo_icone = '🎲' if is_mix else '📋'
         await msg.edit(
@@ -198,7 +198,7 @@ class PlaylistAddBulk:
             ids_existentes.add(video['video_id'])
             adicionados += 1
 
-        self.repo.save(playlist)
+        self.repo.save(self.state.guild_id, playlist)
         for idx in novos_indices:
             self._atualizar_shuffle_com_novo_video(idx)
 

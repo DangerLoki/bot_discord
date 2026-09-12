@@ -2,33 +2,48 @@
 from unittest.mock import AsyncMock
 
 from tests.conftest import make_video
+import pytest
 
 URL_VALIDA = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
 
 class TestAdicionarPorUrl:
+    @pytest.mark.asyncio
+
     async def test_url_invalida_envia_erro(self, playlist_service, fake_ctx):
         await playlist_service.adicionar_por_url(fake_ctx, "https://example.com/nao-e-video")
         fake_ctx.send.assert_awaited_once()
-        assert playlist_service.repo.load() == []
+        assert playlist_service.repo.load(123456789) == []
+
+    @pytest.mark.asyncio
+
 
     async def test_video_ja_na_playlist_envia_aviso(self, playlist_service, fake_ctx):
-        playlist_service.repo.save([make_video("dQw4w9WgXcQ")])
+        playlist_service.repo.save(123456789, [make_video("dQw4w9WgXcQ")])
         await playlist_service.adicionar_por_url(fake_ctx, URL_VALIDA)
         fake_ctx.send.assert_awaited_once()
-        assert len(playlist_service.repo.load()) == 1
+        assert len(playlist_service.repo.load(123456789)) == 1
+
+    @pytest.mark.asyncio
+
 
     async def test_geo_bloqueado_nao_adiciona(self, playlist_service, fake_ctx, fake_message):
         playlist_service.yt.obter_info_video = AsyncMock(return_value={"geo_blocked": True})
         await playlist_service.adicionar_por_url(fake_ctx, URL_VALIDA)
         fake_message.edit.assert_awaited_once()
-        assert playlist_service.repo.load() == []
+        assert playlist_service.repo.load(123456789) == []
+
+    @pytest.mark.asyncio
+
 
     async def test_live_nao_suportada(self, playlist_service, fake_ctx, fake_message):
         playlist_service.yt.obter_info_video = AsyncMock(return_value={"is_live": True})
         await playlist_service.adicionar_por_url(fake_ctx, URL_VALIDA)
         fake_message.edit.assert_awaited_once()
-        assert playlist_service.repo.load() == []
+        assert playlist_service.repo.load(123456789) == []
+
+    @pytest.mark.asyncio
+
 
     async def test_adiciona_com_sucesso(self, playlist_service, fake_ctx, fake_message):
         playlist_service.yt.obter_info_video = AsyncMock(return_value={
@@ -39,27 +54,33 @@ class TestAdicionarPorUrl:
             "views": 1_000_000,
         })
         await playlist_service.adicionar_por_url(fake_ctx, URL_VALIDA)
-        playlist = playlist_service.repo.load()
+        playlist = playlist_service.repo.load(123456789)
         assert len(playlist) == 1
         assert playlist[0]["video_id"] == "dQw4w9WgXcQ"
         assert playlist[0]["titulo"] == "Never Gonna Give You Up"
         assert playlist[0]["posicao"] == 1
         fake_message.edit.assert_awaited_once()
 
+    @pytest.mark.asyncio
+
+
     async def test_adiciona_sem_info_video_usa_desconhecido(
         self, playlist_service, fake_ctx, fake_message
     ):
         playlist_service.yt.obter_info_video = AsyncMock(return_value=None)
         await playlist_service.adicionar_por_url(fake_ctx, URL_VALIDA)
-        playlist = playlist_service.repo.load()
+        playlist = playlist_service.repo.load(123456789)
         assert len(playlist) == 1
         assert playlist[0]["titulo"] is None
         assert playlist[0]["duracao_formatada"] == "??:??"
 
+    @pytest.mark.asyncio
+
+
     async def test_atualiza_shuffle_playlist_ao_adicionar(
         self, playlist_service, fake_ctx, fake_message
     ):
-        playlist_service.repo.save([make_video("existente")])
+        playlist_service.repo.save(123456789, [make_video("existente")])
         playlist_service.state.shuffle_mode = True
         playlist_service.state.shuffle_playlist = [0]
         playlist_service.yt.obter_info_video = AsyncMock(return_value={

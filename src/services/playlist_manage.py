@@ -22,7 +22,7 @@ class PlaylistManage:
                 'Exemplos: `&remove 5` | `&remove dQw4w9WgXcQ`'
             )
             return
-        playlist = self.repo.load()
+        playlist = self.repo.load(self.state.guild_id)
         if not playlist:
             await ctx.send('⚠️ A playlist está vazia.')
             return
@@ -80,7 +80,8 @@ class PlaylistManage:
                 if pos != index
             ]
 
-        self.repo.save(playlist)
+        self.repo.save(self.state.guild_id, playlist)
+        self._cleanup_orphaned_cache()
 
         if len(playlist) == 0:
             st.playlist_index = 0
@@ -116,7 +117,7 @@ class PlaylistManage:
                 'Exemplos: `&promover 6` | `&promover dQw4w9WgXcQ` | `&promover never gonna`'
             )
             return
-        playlist = self.repo.load()
+        playlist = self.repo.load(self.state.guild_id)
         if not playlist:
             await ctx.send('⚠️ A playlist está vazia.')
             return
@@ -190,7 +191,7 @@ class PlaylistManage:
                 st.shuffle_playlist.pop(current_shuffle_pos)
                 st.shuffle_playlist.insert(next_shuffle_pos, index_video)
             nova_pos = next_shuffle_pos + 1
-            self.repo.save(playlist)  # garante salvamento também no modo shuffle
+            self.repo.save(self.state.guild_id, playlist)  # garante salvamento também no modo shuffle
         else:
             next_index = (st.playlist_index + 1) % len(playlist)
             if index_video != next_index:
@@ -204,7 +205,7 @@ class PlaylistManage:
                 nova_pos = next_pos + 1
             else:
                 nova_pos = next_index + 1
-        self.repo.save(playlist)
+        self.repo.save(self.state.guild_id, playlist)
 
         modo = 'SHUFFLE' if st.shuffle_mode else 'NORMAL'
         logger.info(f'[PROMOTE] {modo} {video_id} ("{video.get("titulo", video_id)}") → posição {nova_pos}')
@@ -228,7 +229,7 @@ class PlaylistManage:
     # ------------------------------------------------------------------
 
     async def inverter_playlist(self, ctx, *, silencioso: bool = False) -> None:
-        playlist = self.repo.load()
+        playlist = self.repo.load(self.state.guild_id)
         if not playlist:
             if not silencioso:
                 await ctx.send('⚠️ A playlist está vazia.')
@@ -286,7 +287,7 @@ class PlaylistManage:
                     st.playlist_index = i
                     break
 
-        self.repo.save(playlist)
+        self.repo.save(self.state.guild_id, playlist)
         logger.info(
             f'[INVERT] Fila de músicas não tocadas invertida por {ctx.author} '
             f'({len(indices_pendentes)} música(s))'
@@ -308,17 +309,18 @@ class PlaylistManage:
     # ------------------------------------------------------------------
 
     async def limpar_playlist(self, ctx) -> None:
-        playlist = self.repo.load()
+        playlist = self.repo.load(self.state.guild_id)
         if not playlist:
             await ctx.send('⚠️ A playlist já está vazia.')
             return
         total = len(playlist)
-        self.repo.save([])
+        self.repo.save(self.state.guild_id, [])
         self.state.playlist_index = 0
         self.state.shuffle_mode = False
         self.state.shuffle_playlist = []
         self.state.shuffle_index = 0
         self.state.shuffle_id = None
+        self._cleanup_orphaned_cache()
         logger.info(f'[CLEAR] Playlist limpa por {ctx.author}')
         embed = discord.Embed(
             title='🗑️ Playlist Limpa!',

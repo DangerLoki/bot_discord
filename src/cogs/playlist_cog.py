@@ -1,33 +1,39 @@
-"""Cog de gerenciamento da playlist — comandos de fila."""
+"""Cog de gerenciamento da playlist — comandos de fila (multi-guild)."""
 import random
 import urllib.parse
 
 import discord
 from discord.ext import commands
 
+from src.cogs.cog_utils import MultiGuildCog
 from src.logger import get_logger
-from src.models.player_state import PlayerState
 from src.repositories.playlist_repository import PlaylistRepository
-from src.services.playlist_service import PlaylistService
 from src.ui.pagination import PaginacaoPlaylist
 
 logger = get_logger(__name__)
 
 
-class PlaylistCog(commands.Cog, name='Playlist'):
-    """Comandos de gerenciamento da fila de reprodução."""
+class PlaylistCog(MultiGuildCog, name='Playlist'):
+    """Comandos de gerenciamento da fila de reprodução (multi-guild)."""
 
     def __init__(
         self,
         bot: commands.Bot,
-        state: PlayerState,
-        playlist_svc: PlaylistService,
         repo: PlaylistRepository,
+        get_or_create_guild_services,
+        guild_states,
     ) -> None:
-        self.bot = bot
-        self.state = state
-        self.playlist_svc = playlist_svc
+        super().__init__(bot, get_or_create_guild_services, guild_states)
         self.repo = repo
+
+    def _get_state(self, ctx):
+        """Shortcut para pegar state do servidor."""
+        return self.get_state_from_ctx(ctx)
+
+    def _get_services(self, ctx):
+        """Shortcut para pegar serviços do servidor."""
+        playlist_svc, _ = self.get_services_from_ctx(ctx)
+        return playlist_svc
 
     # ------------------------------------------------------------------
     # Adição
@@ -36,7 +42,7 @@ class PlaylistCog(commands.Cog, name='Playlist'):
     @commands.hybrid_command(name='add')
     async def add(self, ctx, *, entrada: str):
         """Adiciona um vídeo, playlist do YouTube ou URL do Spotify."""
-        await self.playlist_svc.adicionar_entrada(ctx, entrada, self.bot)
+        await self._get_services(ctx).adicionar_entrada(ctx, entrada, self.bot)
 
     @commands.hybrid_command(name='playlist', aliases=['pl', 'addplaylist'])
     async def playlist_cmd(self, ctx, *, url: str):
@@ -58,7 +64,7 @@ class PlaylistCog(commands.Cog, name='Playlist'):
             )
             return
         logger.info(f'[ADD PLAYLIST] {url} por {ctx.author}')
-        await self.playlist_svc.adicionar_playlist_youtube(ctx, url)
+        await self._get_services(ctx).adicionar_playlist_youtube(ctx, url)
 
     @commands.hybrid_command(name='spotify', aliases=['sp', 'addspotify'])
     async def spotify_cmd(self, ctx, *, url: str):
@@ -72,7 +78,7 @@ class PlaylistCog(commands.Cog, name='Playlist'):
             )
             return
         logger.info(f'[SPOTIFY CMD] {url} por {ctx.author}')
-        await self.playlist_svc.adicionar_spotify(ctx, url, self.bot)
+        await self._get_services(ctx).adicionar_spotify(ctx, url, self.bot)
 
     # ------------------------------------------------------------------
     # Listagem
@@ -81,8 +87,8 @@ class PlaylistCog(commands.Cog, name='Playlist'):
     @commands.hybrid_command(name='listar')
     async def listar(self, ctx):
         """Lista os vídeos da playlist (paginado)."""
-        playlist = self.repo.load()
-        st = self.state
+        playlist = self.repo.load(ctx.guild.id)
+        st = self._get_state(ctx)
         if st.shuffle_mode and st.shuffle_playlist:
             shuffle_items = []
             for pos, idx in enumerate(st.shuffle_playlist, 1):
@@ -104,25 +110,25 @@ class PlaylistCog(commands.Cog, name='Playlist'):
     async def remove(self, ctx, *, entrada: str = None):
         """Remove um vídeo da playlist pela posição ou pelo ID/URL."""
         logger.info(f'[REMOVE] entrada="{entrada}" por {ctx.author} em #{ctx.channel}')
-        await self.playlist_svc.remover_video(ctx, entrada)
+        await self._get_services(ctx).remover_video(ctx, entrada)
 
     @commands.hybrid_command(name='promover', aliases=['promote', 'proxima', 'boost'])
     async def promover(self, ctx, *, entrada: str = None):
         """Move um vídeo para ser o próximo a tocar."""
         logger.info(f'[PROMOTE] entrada="{entrada}" por {ctx.author} em #{ctx.channel}')
-        await self.playlist_svc.promover_video(ctx, entrada, self.bot)
+        await self._get_services(ctx).promover_video(ctx, entrada, self.bot)
 
     @commands.hybrid_command(name='inverter', aliases=['reverse', 'invert', 'flip'])
     async def inverter(self, ctx):
         """Inverte a ordem da playlist (primeira vira última e vice-versa)."""
         logger.info(f'[INVERT] por {ctx.author} em #{ctx.channel}')
-        await self.playlist_svc.inverter_playlist(ctx)
+        await self._get_services(ctx).inverter_playlist(ctx)
 
     @commands.hybrid_command(name='limpar', aliases=['clear', 'clearall', 'limpartudo'])
     async def limpar(self, ctx):
         """Limpa toda a playlist."""
         logger.info(f'[CLEAR] por {ctx.author} em #{ctx.channel}')
-        await self.playlist_svc.limpar_playlist(ctx)
+        await self._get_services(ctx).limpar_playlist(ctx)
 
     # ------------------------------------------------------------------
     # Shuffle
@@ -131,7 +137,7 @@ class PlaylistCog(commands.Cog, name='Playlist'):
     @commands.hybrid_command(name='aleatorio', aliases=['shuffle', 'random', 'embaralhar'])
     async def aleatorio(self, ctx):
         """Liga/desliga o modo de reprodução aleatória."""
-        await self.playlist_svc.toggle_shuffle(ctx)
+        await self._get_services(ctx).toggle_shuffle(ctx)
 
     # ------------------------------------------------------------------
     # Diversão

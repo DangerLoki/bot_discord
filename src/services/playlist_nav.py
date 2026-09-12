@@ -8,7 +8,7 @@ class PlaylistNav:
     """Mixin: pular para o próximo vídeo e voltar ao anterior."""
 
     async def pular_video(self, ctx, *, announce: bool = True) -> None:
-        playlist = self.repo.load()
+        playlist = self.repo.load(self.state.guild_id)
         if not playlist:
             await ctx.send(embed=embed_erro('❌ Playlist vazia.'))
             return
@@ -35,7 +35,7 @@ class PlaylistNav:
             await ctx.send(embed=embed)
 
     async def voltar_video(self, ctx, *, announce: bool = True) -> None:
-        playlist = self.repo.load()
+        playlist = self.repo.load(self.state.guild_id)
         if not playlist:
             await ctx.send(embed=embed_erro('❌ Playlist vazia.'))
             return
@@ -43,7 +43,7 @@ class PlaylistNav:
         st.playlist_index = (st.playlist_index - 1) % len(playlist)
         # Ao voltar, reseta o flag tocado para permitir reprodução
         playlist[st.playlist_index]['tocado'] = False
-        self.repo.save(playlist)
+        self.repo.save(self.state.guild_id, playlist)
         if not announce:
             return
         video = playlist[st.playlist_index]

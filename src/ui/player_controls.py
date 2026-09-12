@@ -210,3 +210,9 @@ class PlaylistQueueView(discord.ui.View):
     async def adicionar(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         # Não usa _ack aqui: abrir um modal precisa ser a resposta inicial da interação.
         await interaction.response.send_modal(AdicionarMusicaModal(self.playlist_svc))
+
+    @discord.ui.button(emoji='🗑️', style=discord.ButtonStyle.danger, custom_id='playlist:clear', row=1)
+    async def limpar_playlist(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._ack(interaction)
+        ctx = _InteractionCtx(interaction)
+        await self.playlist_svc.limpar_playlist(ctx)

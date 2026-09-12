@@ -1,37 +1,41 @@
-"""Cog de reprodução de áudio — comandos de voz."""
+"""Cog de reprodução de áudio — comandos de voz (multi-guild)."""
 import asyncio
 
 import discord
 from discord.ext import commands
 
+from src.cogs.cog_utils import MultiGuildCog
 from src.logger import get_logger
-from src.models.player_state import PlayerState, RepeatMode
+from src.models.player_state import RepeatMode, PlayerState
 from src.repositories.config_repository import ConfigRepository
 from src.repositories.playlist_repository import PlaylistRepository
-from src.services.player_service import PlayerService
-from src.services.playlist_service import PlaylistService
 
 logger = get_logger(__name__)
 
 
-class MusicCog(commands.Cog, name='Música'):
-    """Comandos de reprodução de áudio em canal de voz."""
+class MusicCog(MultiGuildCog, name='Música'):
+    """Comandos de reprodução de áudio em canal de voz (multi-guild)."""
 
     def __init__(
         self,
         bot: commands.Bot,
-        state: PlayerState,
-        player_svc: PlayerService,
-        playlist_svc: PlaylistService,
         repo: PlaylistRepository,
         config_repo: ConfigRepository,
+        get_or_create_guild_services,
+        guild_states,
     ) -> None:
-        self.bot = bot
-        self.state = state
-        self.player_svc = player_svc
-        self.playlist_svc = playlist_svc
+        super().__init__(bot, get_or_create_guild_services, guild_states)
         self.repo = repo
         self.config_repo = config_repo
+
+    def _get_state(self, ctx):
+        """Shortcut para pegar state do servidor."""
+        return self.get_state_from_ctx(ctx)
+
+    def _get_services(self, ctx):
+        """Shortcut para pegar serviços do servidor."""
+        playlist_svc, player_svc = self.get_services_from_ctx(ctx)
+        return playlist_svc, player_svc
 
     # ------------------------------------------------------------------
     # Conexão
@@ -45,30 +49,30 @@ class MusicCog(commands.Cog, name='Música'):
             return
         canal = ctx.author.voice.channel
 
-        if self.state.voice_client and self.state.voice_client.is_connected():
-            if self.state.voice_client.channel == canal:
+        if self._get_guild_state(ctx).voice_client and self._get_guild_state(ctx).voice_client.is_connected():
+            if self._get_guild_state(ctx).voice_client.channel == canal:
                 await ctx.send('⚠️ Já estou nesse canal!')
                 return
-            await self.state.voice_client.move_to(canal)
+            await self._get_guild_state(ctx).voice_client.move_to(canal)
             await ctx.send(f'🔄 Me movi para **{canal.name}**.')
             return
 
-        self.state.voice_client = await canal.connect()
-        self.state.voice_bot = self.bot
+        self._get_guild_state(ctx).voice_client = await canal.connect()
+        self._get_guild_state(ctx).voice_bot = self.bot
         await ctx.send(f'✅ Entrei em **{canal.name}**! Use `&tocar` para iniciar o áudio.')
         logger.info(f'[VOZ] Bot entrou em: {canal.name}')
 
     @commands.hybrid_command(name='sair', aliases=['leave', 'disconnect', 'dc'])
     async def sair(self, ctx):
         """Para o áudio e sai da call."""
-        if self.state.voice_client:
-            self.state.is_playing_voice = False
-            self.player_svc._parar_status_loop()
-            self.state.voice_client.stop()
-            await self.state.voice_client.disconnect()
-            self.state.voice_client = None
-            await self.player_svc.marcar_parado(ctx)
-            self.player_svc.reset_status_message()
+        if self._get_guild_state(ctx).voice_client:
+            self._get_guild_state(ctx).is_playing_voice = False
+            self._get_guild_services(ctx)[1]._parar_status_loop()
+            self._get_guild_state(ctx).voice_client.stop()
+            await self._get_guild_state(ctx).voice_client.disconnect()
+            self._get_guild_state(ctx).voice_client = None
+            await self._get_guild_services(ctx)[1].marcar_parado(ctx)
+            self._get_guild_services(ctx)[1].reset_status_message()
             await ctx.send('📴 Saí da call.')
             logger.info('[VOZ] Bot saiu da call.')
         else:
@@ -86,10 +90,10 @@ class MusicCog(commands.Cog, name='Música'):
             return
 
         canal_alvo = canal or ctx.channel
-        self.state.player_channel_id = canal_alvo.id
-        self.config_repo.set_valor('player_channel_id', canal_alvo.id)
-        self.player_svc.reset_status_message()
-        self.player_svc.iniciar_limpeza_canal(canal_alvo)
+        self._get_guild_state(ctx).player_channel_id = canal_alvo.id
+        self.config_repo.set_valor(ctx.guild.id, 'player_channel_id', canal_alvo.id)
+        self._get_guild_services(ctx)[1].reset_status_message()
+        self._get_guild_services(ctx)[1].iniciar_limpeza_canal(canal_alvo)
 
         await ctx.send(f'✅ Agora os comandos só são aceitos em {canal_alvo.mention}.')
         logger.info(f'[CANAL] canal de comandos definido: #{canal_alvo.name} ({canal_alvo.id})')
@@ -126,45 +130,45 @@ class MusicCog(commands.Cog, name='Música'):
     @commands.hybrid_command(name='tocar', aliases=['play', 'start'])
     async def tocar(self, ctx):
         """Começa a tocar o áudio da playlist na call."""
-        if not self.state.voice_client or not self.state.voice_client.is_connected():
+        if not self._get_guild_state(ctx).voice_client or not self._get_guild_state(ctx).voice_client.is_connected():
             if ctx.author.voice:
-                self.state.voice_client = await ctx.author.voice.channel.connect()
-                self.state.voice_bot = self.bot
+                self._get_guild_state(ctx).voice_client = await ctx.author.voice.channel.connect()
+                self._get_guild_state(ctx).voice_bot = self.bot
             else:
                 await ctx.send('❌ Não estou em nenhum canal! Use `&entrar` primeiro.')
                 return
-        await self.player_svc.tocar_atual(ctx)
+        await self._get_guild_services(ctx)[1].tocar_atual(ctx)
 
     @commands.hybrid_command(name='pausar', aliases=['pause'])
     async def pausar(self, ctx):
         """Pausa o áudio."""
-        if self.state.voice_client and self.state.voice_client.is_playing():
-            self.state.voice_client.pause()
-            self.state.pausar_rastreio()
-            await self.player_svc.atualizar_status_agora(ctx)
+        if self._get_guild_state(ctx).voice_client and self._get_guild_state(ctx).voice_client.is_playing():
+            self._get_guild_state(ctx).voice_client.pause()
+            self._get_guild_state(ctx).pausar_rastreio()
+            await self._get_guild_services(ctx)[1].atualizar_status_agora(ctx)
         else:
             await ctx.send('❌ Nenhum áudio tocando.')
 
     @commands.hybrid_command(name='retomar', aliases=['resume', 'continuar'])
     async def retomar(self, ctx):
         """Retoma o áudio pausado."""
-        if self.state.voice_client and self.state.voice_client.is_paused():
-            self.state.voice_client.resume()
-            self.state.retomar_rastreio()
-            await self.player_svc.atualizar_status_agora(ctx)
+        if self._get_guild_state(ctx).voice_client and self._get_guild_state(ctx).voice_client.is_paused():
+            self._get_guild_state(ctx).voice_client.resume()
+            self._get_guild_state(ctx).retomar_rastreio()
+            await self._get_guild_services(ctx)[1].atualizar_status_agora(ctx)
         else:
             await ctx.send('❌ Nenhum áudio pausado.')
 
     @commands.hybrid_command(name='parar', aliases=['stop'])
     async def parar(self, ctx):
         """Para o áudio sem sair da call."""
-        if self.state.voice_client and (
-            self.state.voice_client.is_playing() or self.state.voice_client.is_paused()
+        if self._get_guild_state(ctx).voice_client and (
+            self._get_guild_state(ctx).voice_client.is_playing() or self._get_guild_state(ctx).voice_client.is_paused()
         ):
-            self.state.is_playing_voice = False
-            self.player_svc._parar_status_loop()
-            self.state.voice_client.stop()
-            await self.player_svc.marcar_parado(ctx)
+            self._get_guild_state(ctx).is_playing_voice = False
+            self._get_guild_services(ctx)[1]._parar_status_loop()
+            self._get_guild_state(ctx).voice_client.stop()
+            await self._get_guild_services(ctx)[1].marcar_parado(ctx)
         else:
             await ctx.send('❌ Nenhum áudio tocando.')
 
@@ -172,28 +176,28 @@ class MusicCog(commands.Cog, name='Música'):
     async def skip(self, ctx):
         """Pula para o próximo vídeo."""
         logger.info(f'[SKIP] solicitado por {ctx.author} em #{ctx.channel}')
-        connected = bool(self.state.voice_client and self.state.voice_client.is_connected())
-        await self.playlist_svc.pular_video(ctx, announce=not connected)
+        connected = bool(self._get_guild_state(ctx).voice_client and self._get_guild_state(ctx).voice_client.is_connected())
+        await self._get_guild_services(ctx)[0].pular_video(ctx, announce=not connected)
         if connected:
-            await self.player_svc.tocar_atual(ctx)
+            await self._get_guild_services(ctx)[1].tocar_atual(ctx)
 
     @commands.hybrid_command(name='previous', aliases=['voltar', 'anterior'])
     async def previous(self, ctx):
         """Volta ao vídeo anterior."""
         logger.info(f'[PREVIOUS] solicitado por {ctx.author} em #{ctx.channel}')
-        await self.playlist_svc.voltar_video(ctx)
-        if self.state.voice_client and self.state.voice_client.is_connected():
-            await self.player_svc.tocar_atual(ctx)
+        await self._get_guild_services(ctx)[0].voltar_video(ctx)
+        if self._get_guild_state(ctx).voice_client and self._get_guild_state(ctx).voice_client.is_connected():
+            await self._get_guild_services(ctx)[1].tocar_atual(ctx)
 
     @commands.hybrid_command(name='recomecar', aliases=['restart', 'replay', 'reiniciar'])
     async def recomecar(self, ctx):
         """Recomeça a música atual do início."""
         logger.info(f'[RECOMECAR] solicitado por {ctx.author} em #{ctx.channel}')
-        if not self.state.voice_client or not self.state.voice_client.is_connected():
+        if not self._get_guild_state(ctx).voice_client or not self._get_guild_state(ctx).voice_client.is_connected():
             await ctx.send('❌ Não estou em nenhum canal de voz.')
             return
         await ctx.send('🔁 Recomeçando música atual...')
-        await self.player_svc.tocar_atual(ctx)
+        await self._get_guild_services(ctx)[1].tocar_atual(ctx)
 
     @commands.command(name='repetir', aliases=['repeat', 'loop'])
     async def repetir(self, ctx, modo: str = None):
@@ -209,13 +213,13 @@ class MusicCog(commands.Cog, name='Música'):
                 RepeatMode.ONE: RepeatMode.ALL,
                 RepeatMode.ALL: RepeatMode.OFF,
             }
-            self.state.repeat_mode = cycle[self.state.repeat_mode]
+            self._get_guild_state(ctx).repeat_mode = cycle[self._get_guild_state(ctx).repeat_mode]
         elif modo.lower() in modos_one:
-            self.state.repeat_mode = RepeatMode.ONE
+            self._get_guild_state(ctx).repeat_mode = RepeatMode.ONE
         elif modo.lower() in modos_all:
-            self.state.repeat_mode = RepeatMode.ALL
+            self._get_guild_state(ctx).repeat_mode = RepeatMode.ALL
         elif modo.lower() in modos_off:
-            self.state.repeat_mode = RepeatMode.OFF
+            self._get_guild_state(ctx).repeat_mode = RepeatMode.OFF
         else:
             await ctx.send(
                 '❌ Modo inválido. Use: `&repetir musica`, `&repetir playlist` ou `&repetir off`'
@@ -227,8 +231,8 @@ class MusicCog(commands.Cog, name='Música'):
             RepeatMode.ONE: '🔂 Repetindo a **música atual**.',
             RepeatMode.ALL: '🔁 Repetindo a **playlist inteira**.',
         }
-        await ctx.send(mensagens[self.state.repeat_mode])
-        await self.player_svc.atualizar_status_agora(ctx)
+        await ctx.send(mensagens[self._get_guild_state(ctx).repeat_mode])
+        await self._get_guild_services(ctx)[1].atualizar_status_agora(ctx)
 
     # ------------------------------------------------------------------
     # Volume
@@ -238,17 +242,17 @@ class MusicCog(commands.Cog, name='Música'):
     async def volume(self, ctx, valor: int = None):
         """Ajusta o volume (0 a 200)."""
         if valor is None:
-            porcentagem = int(self.state.voice_volume * 100)
+            porcentagem = int(self._get_guild_state(ctx).voice_volume * 100)
             await ctx.send(f'🔉 Volume atual: **{porcentagem}%**')
             return
         if not 0 <= valor <= 200:
             await ctx.send('❌ Volume deve ser entre **0** e **200**.')
             return
-        self.state.voice_volume = valor / 100.0
-        if self.state.voice_client and self.state.voice_client.source:
-            self.state.voice_client.source.volume = self.state.voice_volume
+        self._get_guild_state(ctx).voice_volume = valor / 100.0
+        if self._get_guild_state(ctx).voice_client and self._get_guild_state(ctx).voice_client.source:
+            self._get_guild_state(ctx).voice_client.source.volume = self._get_guild_state(ctx).voice_volume
         await ctx.send(f'🔉 Volume ajustado para **{valor}%**.')
-        await self.player_svc.atualizar_status_agora(ctx)
+        await self._get_guild_services(ctx)[1].atualizar_status_agora(ctx)
 
     # ------------------------------------------------------------------
     # Now Playing
@@ -257,7 +261,7 @@ class MusicCog(commands.Cog, name='Música'):
     @commands.hybrid_command(name='tocando', aliases=['np', 'nowplaying', 'atual'])
     async def tocando(self, ctx):
         """Mostra o que está tocando na call."""
-        vc = self.state.voice_client
+        vc = self._get_guild_state(ctx).voice_client
         if not vc or not vc.is_connected():
             await ctx.send('❌ Não estou em nenhum canal.')
             return
@@ -269,7 +273,7 @@ class MusicCog(commands.Cog, name='Música'):
             await ctx.send('❌ Playlist vazia.')
             return
         index = (
-            self.state.playlist_index if self.state.playlist_index < len(playlist) else 0
+            self._get_guild_state(ctx).playlist_index if self._get_guild_state(ctx).playlist_index < len(playlist) else 0
         )
         video = playlist[index]
         status = '⏸️ Pausado' if vc.is_paused() else '▶️ Tocando'
@@ -281,7 +285,7 @@ class MusicCog(commands.Cog, name='Música'):
         embed.set_thumbnail(url=video.get('thumbnail_url', ''))
         embed.add_field(name='Duração', value=video.get('duracao_formatada', '??:??'), inline=True)
         embed.add_field(name='Posição', value=f'{index + 1}/{len(playlist)}', inline=True)
-        embed.add_field(name='Volume', value=f'{int(self.state.voice_volume * 100)}%', inline=True)
+        embed.add_field(name='Volume', value=f'{int(self._get_guild_state(ctx).voice_volume * 100)}%', inline=True)
         embed.add_field(name='Canal', value=video.get('canal', 'Desconhecido'), inline=True)
         await ctx.send(embed=embed)
 

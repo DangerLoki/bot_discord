@@ -6,7 +6,7 @@ from src.models.player_state import PlayerState, RepeatMode
 
 class TestEstadoInicial:
     def test_valores_padrao(self):
-        st = PlayerState()
+        st = PlayerState(guild_id=123456789)
         assert st.is_playing_voice is False
         assert st.repeat_mode == RepeatMode.OFF
         assert st.playlist_index == 0

@@ -41,7 +41,7 @@ def playlist_repo(tmp_path):
 
 @pytest.fixture
 def player_state():
-    return PlayerState()
+    return PlayerState(guild_id=123456789)
 
 
 @pytest.fixture
