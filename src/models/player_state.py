@@ -65,6 +65,7 @@ class PlayerState:
             'repeat_mode': self.repeat_mode.value,
             'playlist_index': self.playlist_index,
             'shuffle_mode': self.shuffle_mode,
+            'shuffle_playlist': self.shuffle_playlist.copy(),
             'shuffle_index': self.shuffle_index,
             'shuffle_id': self.shuffle_id,
             'player_channel_id': self.player_channel_id,
@@ -79,6 +80,12 @@ class PlayerState:
         self.repeat_mode = RepeatMode(repeat_str)
         self.playlist_index = data.get('playlist_index', 0)
         self.shuffle_mode = data.get('shuffle_mode', False)
+        shuffle_playlist = data.get('shuffle_playlist', [])
+        self.shuffle_playlist = (
+            [indice for indice in shuffle_playlist if isinstance(indice, int)]
+            if isinstance(shuffle_playlist, list)
+            else []
+        )
         self.shuffle_index = data.get('shuffle_index', 0)
         self.shuffle_id = data.get('shuffle_id')
         self.player_channel_id = data.get('player_channel_id')

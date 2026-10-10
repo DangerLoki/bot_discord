@@ -132,6 +132,7 @@ class MusicCog(MultiGuildCog, name='Música'):
             await aviso.delete()
         except (discord.NotFound, discord.HTTPException):
             pass
+        await self._get_guild_services(ctx)[1].garantir_painel(ctx)
 
     # ------------------------------------------------------------------
     # Reprodução
@@ -258,9 +259,11 @@ class MusicCog(MultiGuildCog, name='Música'):
         if not 0 <= valor <= 200:
             await ctx.send('❌ Volume deve ser entre **0** e **200**.')
             return
-        self._get_guild_state(ctx).voice_volume = valor / 100.0
-        if self._get_guild_state(ctx).voice_client and self._get_guild_state(ctx).voice_client.source:
-            self._get_guild_state(ctx).voice_client.source.volume = self._get_guild_state(ctx).voice_volume
+        state = self._get_guild_state(ctx)
+        state.voice_volume = valor / 100.0
+        if state.voice_client and state.voice_client.source:
+            state.voice_client.source.volume = state.voice_volume
+        await self._get_guild_services(ctx)[1].persistir_estado()
         await ctx.send(f'🔉 Volume ajustado para **{valor}%**.')
         await self._get_guild_services(ctx)[1].atualizar_status_agora(ctx)
 

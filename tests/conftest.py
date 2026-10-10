@@ -62,6 +62,7 @@ def fake_ctx(fake_message):
     ctx = MagicMock()
     ctx.author = "TesterUser"
     ctx.send = AsyncMock(return_value=fake_message)
+    ctx.channel.send = AsyncMock(return_value=fake_message)
     return ctx
 
 
@@ -95,10 +96,12 @@ def playlist_service(playlist_repo, player_state):
 @pytest.fixture
 def player_service(playlist_repo, player_state, playlist_service):
     """PlayerService com repo real (tmp), yt mockado e playlist_service real."""
-    return PlayerService(
+    service = PlayerService(
         state=player_state,
         repo=playlist_repo,
         yt=MagicMock(),
         playlist_svc=playlist_service,
     )
+    playlist_service.player_svc = service
+    return service
 

@@ -9,6 +9,7 @@ from src.cogs.cog_utils import MultiGuildCog
 from src.logger import get_logger
 from src.repositories.playlist_repository import PlaylistRepository
 from src.ui.pagination import PaginacaoPlaylist
+from src.ui.player_controls import ConfirmarLimpezaView
 
 logger = get_logger(__name__)
 
@@ -128,7 +129,13 @@ class PlaylistCog(MultiGuildCog, name='Playlist'):
     async def limpar(self, ctx):
         """Limpa toda a playlist."""
         logger.info(f'[CLEAR] por {ctx.author} em #{ctx.channel}')
-        await self._get_services(ctx).limpar_playlist(ctx)
+        playlist_svc = self._get_services(ctx)
+        await ctx.send(
+            '⚠️ Tem certeza de que deseja remover todas as músicas da fila?',
+            view=ConfirmarLimpezaView(
+                playlist_svc, getattr(ctx.author, 'id', None)
+            ),
+        )
 
     # ------------------------------------------------------------------
     # Shuffle

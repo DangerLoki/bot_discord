@@ -162,6 +162,7 @@ async def test_remover_faixa_atual_inicia_a_proxima(playlist_service, fake_ctx):
     playlist_service.state.voice_client = voice_client
     playlist_service.player_svc = MagicMock()
     playlist_service.player_svc.tocar_atual = AsyncMock()
+    playlist_service.player_svc.atualizar_painel = AsyncMock()
 
     await playlist_service.remover_video(fake_ctx, '1')
 
@@ -206,4 +207,26 @@ async def test_definircanal_cria_painel_imediatamente():
     await MusicCog.definircanal.callback(cog, ctx)
 
     assert state.player_channel_id == 99
+    player_svc.garantir_painel.assert_awaited_once_with(ctx)
+
+
+@pytest.mark.asyncio
+async def test_limparchat_recria_painel_depois_do_purge():
+    cog = object.__new__(MusicCog)
+    state = PlayerState(42)
+    playlist_svc = MagicMock()
+    player_svc = MagicMock(garantir_painel=AsyncMock())
+    cog.get_state_from_ctx = MagicMock(return_value=state)
+    cog.get_services_from_ctx = MagicMock(return_value=(playlist_svc, player_svc))
+
+    aviso = MagicMock(delete=AsyncMock())
+    ctx = MagicMock()
+    ctx.guild.id = 42
+    ctx.author = MagicMock()
+    ctx.channel = MagicMock(purge=AsyncMock(return_value=[]))
+    ctx.send = AsyncMock(return_value=aviso)
+
+    with patch('src.cogs.music_cog.asyncio.sleep', new=AsyncMock()):
+        await MusicCog.limparchat.callback(cog, ctx, 50)
+
     player_svc.garantir_painel.assert_awaited_once_with(ctx)

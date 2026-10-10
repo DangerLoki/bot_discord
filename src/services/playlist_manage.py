@@ -81,17 +81,11 @@ class PlaylistManage:
         video = playlist[index]
         titulo = video.get('titulo') or 'Desconhecido'
         removendo_atual = index == st.playlist_index
-
         playlist.pop(index)
         for i, v in enumerate(playlist):
             v['posicao'] = i + 1
 
-        if st.shuffle_mode and st.shuffle_playlist:
-            st.shuffle_playlist = [
-                pos if pos < index else pos - 1
-                for pos in st.shuffle_playlist
-                if pos != index
-            ]
+        self.remover_indice_shuffle(index)
 
         self.repo.save(self.state.guild_id, playlist)
 
@@ -103,6 +97,9 @@ class PlaylistManage:
             st.playlist_index -= 1
         elif removendo_atual and st.playlist_index >= len(playlist):
             st.playlist_index = 0
+
+        if removendo_atual and playlist and st.shuffle_mode:
+            st.playlist_index = self.proximo_aleatorio(playlist)
 
         embed = discord.Embed(title='🗑️ Vídeo Removido!', description=f'**{titulo}**', color=0xFF0000)
         embed.set_thumbnail(url=video.get('thumbnail_url', ''))
@@ -129,6 +126,7 @@ class PlaylistManage:
                 await self.player_svc.tocar_atual(ctx)
 
         self._cleanup_orphaned_cache()
+        await self._atualizar_painel(ctx)
 
     # ------------------------------------------------------------------
     # Promoção
@@ -223,10 +221,11 @@ class PlaylistManage:
             if current_shuffle_pos is None:
                 await ctx.send('❌ Erro interno: vídeo não encontrado na lista shuffle.')
                 return
-            next_shuffle_pos = (st.shuffle_index + 1) % len(st.shuffle_playlist)
-            if current_shuffle_pos != next_shuffle_pos:
-                st.shuffle_playlist.pop(current_shuffle_pos)
-                st.shuffle_playlist.insert(next_shuffle_pos, index_video)
+            if current_shuffle_pos < st.shuffle_index:
+                st.shuffle_index = max(0, st.shuffle_index - 1)
+            st.shuffle_playlist.pop(current_shuffle_pos)
+            next_shuffle_pos = min(st.shuffle_index, len(st.shuffle_playlist))
+            st.shuffle_playlist.insert(next_shuffle_pos, index_video)
             nova_pos = next_shuffle_pos + 1
             self.repo.save(self.state.guild_id, playlist)  # garante salvamento também no modo shuffle
         else:
@@ -260,6 +259,7 @@ class PlaylistManage:
             await confirm_msg.edit(embed=embed)
         else:
             await ctx.send(embed=embed)
+        await self._atualizar_painel(ctx)
 
     # ------------------------------------------------------------------
     # Inversão
@@ -276,7 +276,7 @@ class PlaylistManage:
         total = len(playlist)
 
         if st.shuffle_mode and st.shuffle_playlist:
-            restante = st.shuffle_playlist[st.shuffle_index + 1:]
+            restante = st.shuffle_playlist[st.shuffle_index:]
             if len(restante) < 2:
                 if not silencioso:
                     await ctx.send(
@@ -284,10 +284,11 @@ class PlaylistManage:
                     )
                 return
             restante.reverse()
-            st.shuffle_playlist[st.shuffle_index + 1:] = restante
+            st.shuffle_playlist[st.shuffle_index:] = restante
             logger.info(f'[INVERT] Ordem aleatória restante invertida por {ctx.author}')
 
             if silencioso:
+                await self._atualizar_painel(ctx)
                 return
 
             embed = discord.Embed(
@@ -297,6 +298,7 @@ class PlaylistManage:
             )
             embed.set_footer(text=f'Invertida por {ctx.author}')
             await ctx.send(embed=embed)
+            await self._atualizar_painel(ctx)
             return
 
         # Só invertemos as músicas ainda não tocadas — mantém o histórico
@@ -331,6 +333,7 @@ class PlaylistManage:
         )
 
         if silencioso:
+            await self._atualizar_painel(ctx)
             return
 
         embed = discord.Embed(
@@ -340,6 +343,7 @@ class PlaylistManage:
         )
         embed.set_footer(text=f'Invertida por {ctx.author}')
         await ctx.send(embed=embed)
+        await self._atualizar_painel(ctx)
 
     # ------------------------------------------------------------------
     # Limpeza
@@ -366,3 +370,4 @@ class PlaylistManage:
         )
         embed.set_footer(text=f'Limpa por {ctx.author}')
         await ctx.send(embed=embed)
+        await self._atualizar_painel(ctx)

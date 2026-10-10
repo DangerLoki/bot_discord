@@ -35,12 +35,14 @@ class PlayerService(PlayerStatus):
         repo: PlaylistRepository,
         yt: YouTubeService,
         playlist_svc: PlaylistService,
+        config_repo=None,
         service_resolver=None,
     ) -> None:
         self.state = state
         self.repo = repo
         self.yt = yt
         self.playlist_svc = playlist_svc
+        self.config_repo = config_repo
         self._status_msg: discord.Message | None = None
         self._playlist_msg: discord.Message | None = None
         self._current_video: dict | None = None
@@ -48,11 +50,22 @@ class PlayerService(PlayerStatus):
         self._current_audio_path: str | None = None
         self._preservar_cache_ao_parar: bool = False
         self._playlist_scroll: int = 0
+        self._panel_refresh_lock = asyncio.Lock()
         self.view = PlayerControlView(
             state, self, playlist_svc, service_resolver=service_resolver
         )
         self.queue_view = PlaylistQueueView(
             state, self, playlist_svc, service_resolver=service_resolver
+        )
+
+    async def persistir_estado(self) -> None:
+        """Grava imediatamente as preferências persistíveis da guild."""
+        if self.config_repo is None:
+            return
+        await self.config_repo.set_valor_async(
+            self.state.guild_id,
+            'player_state',
+            self.state.to_dict(),
         )
 
     # ------------------------------------------------------------------
@@ -119,51 +132,167 @@ class PlayerService(PlayerStatus):
     def _construir_embed_playlist(
         self, playlist: list, indice_atual: int, inicio: int | None = None
     ) -> discord.Embed:
-        """Monta o embed da fila, marcando a música atual (▶️) e a próxima (⏭️).
+        """Monta a fila na ordem efetiva, normal ou aleatória.
 
         `inicio` permite rolar manualmente a janela exibida (paginação via botões).
         Quando omitido, a janela é centralizada automaticamente na faixa atual.
         """
-        embed = discord.Embed(title='📋 Fila de Reprodução', color=0x5865F2)
-        total = len(playlist)
+        st = self.state
+        ordem: list[int]
+        if st.shuffle_mode:
+            vistos = set()
+            ordem = []
+            for indice in st.shuffle_playlist:
+                if 0 <= indice < len(playlist) and indice not in vistos:
+                    ordem.append(indice)
+                    vistos.add(indice)
+            titulo = '🔀 Fila Aleatória'
+        else:
+            ordem = list(range(len(playlist)))
+            titulo = '📋 Fila de Reprodução'
+
+        total = len(ordem)
+        embed = discord.Embed(title=titulo, color=0x5865F2)
         if not playlist:
             embed.description = 'Playlist vazia.'
             self._playlist_scroll = 0
+            self.queue_view.sincronizar_paginacao(False, False)
             return embed
+
+        # Uma ordem persistida antiga pode ficar vazia após alterações manuais
+        # no arquivo. Nesse caso a ordem física ainda é uma representação útil.
+        if not ordem:
+            ordem = list(range(len(playlist)))
+            total = len(ordem)
+
+        try:
+            posicao_atual = ordem.index(indice_atual)
+        except ValueError:
+            posicao_atual = 0
+
+        proximo_indice = None
+        if st.shuffle_mode and st.shuffle_playlist:
+            if st.shuffle_index < len(st.shuffle_playlist):
+                candidato = st.shuffle_playlist[st.shuffle_index]
+                if 0 <= candidato < len(playlist):
+                    proximo_indice = candidato
+        elif indice_atual + 1 < len(playlist):
+            proximo_indice = indice_atual + 1
+        elif st.repeat_mode == RepeatMode.ALL and playlist:
+            proximo_indice = 0
 
         if total <= PLAYLIST_MSG_LIMITE:
             inicio = 0
         elif inicio is None:
-            inicio = max(0, min(indice_atual - 2, total - PLAYLIST_MSG_LIMITE))
+            inicio = max(0, min(posicao_atual - 2, total - PLAYLIST_MSG_LIMITE))
         else:
             inicio = max(0, min(inicio, total - PLAYLIST_MSG_LIMITE))
         self._playlist_scroll = inicio
         fim = min(total, inicio + PLAYLIST_MSG_LIMITE)
+        self.queue_view.sincronizar_paginacao(inicio > 0, fim < total)
 
         linhas = []
         if inicio > 0:
             linhas.append(f'*… e mais {inicio} música(s) acima*')
-        for i in range(inicio, fim):
-            video = playlist[i]
+        for posicao_visual in range(inicio, fim):
+            indice_real = ordem[posicao_visual]
+            video = playlist[indice_real]
             titulo = video.get('titulo') or 'Desconhecido'
             url = video.get('embed_url') or '#'
-            if i == indice_atual:
+            if indice_real == indice_atual:
                 marcador = '▶️'
-            elif i == (indice_atual + 1) % total:
+            elif indice_real == proximo_indice:
                 marcador = '⏭️'
             else:
                 marcador = '▫️'
-            linhas.append(f'{marcador} **{i + 1}.** [{titulo}]({url})')
+            linhas.append(
+                f'{marcador} **{posicao_visual + 1}.** [{titulo}]({url})'
+            )
         if fim < total:
             linhas.append(f'*… e mais {total - fim} música(s) abaixo*')
 
         embed.description = '\n'.join(linhas)
-        embed.set_footer(text=f'{total} música(s) na fila · 🔃 inverte · ◀️▶️ navega')
+        if st.shuffle_mode:
+            restantes = max(0, len(st.shuffle_playlist) - st.shuffle_index)
+            rodape = (
+                f'{total} música(s) · {restantes} restante(s) · '
+                f'Shuffle {st.shuffle_id or "sem ID"} · 🔃 inverte · ◀️▶️ navega'
+            )
+        else:
+            rodape = f'{total} música(s) na fila · 🔃 inverte · ◀️▶️ navega'
+        embed.set_footer(text=rodape)
         return embed
 
-    async def _atualizar_mensagem_playlist(self, ctx, playlist: list, indice_atual: int) -> None:
-        embed = self._construir_embed_playlist(playlist, indice_atual)
+    async def _atualizar_mensagem_playlist(
+        self,
+        ctx,
+        playlist: list,
+        indice_atual: int,
+        *,
+        preservar_pagina: bool = False,
+    ) -> None:
+        inicio = self._playlist_scroll if preservar_pagina else None
+        embed = self._construir_embed_playlist(playlist, indice_atual, inicio=inicio)
         await self._get_playlist_message(ctx, embed)
+
+    def _construir_embed_ocioso(self, total_fila: int = 0) -> discord.Embed:
+        self.view.sincronizar_estado(self.state)
+        if total_fila:
+            descricao = (
+                f'**{total_fila} música(s) aguardando na fila.**\n'
+                'Entre em um canal de voz e pressione **▶️** para começar.'
+            )
+            rodape = 'A fila está pronta para reprodução.'
+        else:
+            descricao = (
+                'A fila está vazia no momento.\n'
+                'Use o botão **➕** na fila acima para adicionar uma música.'
+            )
+            rodape = 'Adicione uma música para começar.'
+
+        embed = discord.Embed(
+            title='🎵 Painel de Música',
+            description=descricao,
+            color=0x5865F2,
+        )
+        embed.set_footer(text=rodape)
+        return embed
+
+    async def atualizar_painel(
+        self,
+        ctx,
+        *,
+        atualizar_fila: bool = True,
+        atualizar_player: bool = True,
+        preservar_pagina: bool = False,
+    ) -> None:
+        """Mantém fila, player e botões coerentes após qualquer mutação."""
+        async with self._panel_refresh_lock:
+            playlist = self.repo.load(self.state.guild_id)
+            if atualizar_fila:
+                await self._atualizar_mensagem_playlist(
+                    ctx,
+                    playlist,
+                    self.state.playlist_index,
+                    preservar_pagina=preservar_pagina,
+                )
+            if not atualizar_player:
+                return
+
+            if self._current_video:
+                video_id = self._current_video.get('video_id')
+                atual = next(
+                    (video for video in playlist if video.get('video_id') == video_id),
+                    self._current_video,
+                )
+                self._current_video = atual
+                self._current_total = len(playlist)
+                embed = self._construir_embed_tocando(
+                    atual, self._current_total, self.state
+                )
+            else:
+                embed = self._construir_embed_ocioso(len(playlist))
+            await self._get_status_message(ctx, embed)
 
     async def garantir_painel(self, ctx) -> None:
         """Cria ou restaura o painel, inclusive quando a playlist está vazia."""
@@ -176,28 +305,19 @@ class PlayerService(PlayerStatus):
         if self._current_video:
             await self.atualizar_status_agora(ctx)
             return
-
-        embed = discord.Embed(
-            title='🎵 Painel de Música',
-            description=(
-                'Nenhuma música está tocando no momento.\n'
-                'Use o botão **➕** na fila acima para adicionar uma música.'
-            ),
-            color=0x5865F2,
-        )
-        embed.set_footer(text='Adicione uma música para começar.')
-        await self._get_status_message(ctx, embed)
+        await self._get_status_message(ctx, self._construir_embed_ocioso(len(playlist)))
 
     async def mudar_pagina_playlist(self, ctx, delta: int) -> None:
         """Rola a mensagem da fila para frente/trás em blocos de `PLAYLIST_MSG_LIMITE`."""
-        playlist = self.repo.load(self.state.guild_id)
-        if not playlist:
-            return
-        novo_inicio = self._playlist_scroll + delta * PLAYLIST_MSG_LIMITE
-        embed = self._construir_embed_playlist(
-            playlist, self.state.playlist_index, inicio=novo_inicio
-        )
-        await self._get_playlist_message(ctx, embed)
+        async with self._panel_refresh_lock:
+            playlist = self.repo.load(self.state.guild_id)
+            if not playlist:
+                return
+            novo_inicio = self._playlist_scroll + delta * PLAYLIST_MSG_LIMITE
+            embed = self._construir_embed_playlist(
+                playlist, self.state.playlist_index, inicio=novo_inicio
+            )
+            await self._get_playlist_message(ctx, embed)
 
     async def _baixar_audio_com_retry(self, video_url: str, video_id: str) -> str | None:
         """Tenta baixar áudio com retry automático em falhas transientes."""
@@ -225,6 +345,28 @@ class PlayerService(PlayerStatus):
         if self.state.playlist_index >= len(playlist):
             self.state.playlist_index = 0
         return playlist, playlist[self.state.playlist_index]
+
+    def _avancar_apos_falha(self, playlist: list) -> bool:
+        """Avança respeitando shuffle e evita tentar novamente a faixa com erro."""
+        st = self.state
+        if not playlist:
+            return False
+        if 0 <= st.playlist_index < len(playlist):
+            playlist[st.playlist_index]['tocado'] = True
+            self.repo.save(self.state.guild_id, playlist)
+        if st.shuffle_mode:
+            st.playlist_index = self.playlist_svc.proximo_aleatorio(playlist)
+            return True
+
+        st.playlist_index = (st.playlist_index + 1) % len(playlist)
+        tentativas = 0
+        while (
+            tentativas < len(playlist)
+            and playlist[st.playlist_index].get('tocado', False)
+        ):
+            st.playlist_index = (st.playlist_index + 1) % len(playlist)
+            tentativas += 1
+        return tentativas < len(playlist)
 
 
     async def _preparar_canal_painel(self, ctx) -> None:
@@ -345,7 +487,10 @@ class PlayerService(PlayerStatus):
             )
 
             if st.shuffle_mode and st.shuffle_id:
-                posicao_shuffle = st.shuffle_index + 1
+                try:
+                    posicao_shuffle = st.shuffle_playlist.index(st.playlist_index) + 1
+                except ValueError:
+                    posicao_shuffle = max(1, st.shuffle_index)
                 playlist[st.playlist_index]['shuffle_id'] = st.shuffle_id
                 playlist[st.playlist_index]['posicao_shuffle'] = posicao_shuffle
             self.repo.save(self.state.guild_id, playlist)
@@ -371,14 +516,27 @@ class PlayerService(PlayerStatus):
                     )
                 )
                 playlist = self.repo.load(self.state.guild_id)
-                playlist = [v for v in playlist if v.get('video_id') != video_id]
+                indice_removido = next(
+                    (
+                        indice
+                        for indice, item in enumerate(playlist)
+                        if item.get('video_id') == video_id
+                    ),
+                    None,
+                )
+                if indice_removido is not None:
+                    playlist.pop(indice_removido)
+                    self.playlist_svc.remover_indice_shuffle(indice_removido)
                 for i, v in enumerate(playlist):
                     v['posicao'] = i + 1
                 self.repo.save(self.state.guild_id, playlist)
                 if not playlist:
                     await ctx.send(embed=embed_aviso('📋 Playlist vazia após remoção.'))
                     return
-                st.playlist_index = st.playlist_index % len(playlist)
+                if st.shuffle_mode:
+                    st.playlist_index = self.playlist_svc.proximo_aleatorio(playlist)
+                else:
+                    st.playlist_index = st.playlist_index % len(playlist)
                 continue
             except asyncio.TimeoutError:
                 playlist_atual, video_atual = self._video_atual_persistido()
@@ -399,7 +557,7 @@ class PlayerService(PlayerStatus):
                     f'[PERF][DOWNLOAD] timeout após {DOWNLOAD_TIMEOUT_SECONDS}s '
                     f'video_id={video_id}'
                 )
-                st.playlist_index = (st.playlist_index + 1) % len(playlist)
+                tem_proxima = self._avancar_apos_falha(playlist)
                 if falhas_consecutivas >= 3:
                     st.is_playing_voice = False
                     await ctx.send(
@@ -408,6 +566,10 @@ class PlayerService(PlayerStatus):
                             'Tente novamente em instantes.'
                         )
                     )
+                    return
+                if not tem_proxima:
+                    await ctx.send(embed=embed_aviso('📋 Nenhuma música disponível para tocar.'))
+                    st.is_playing_voice = False
                     return
                 continue
 
@@ -437,15 +599,7 @@ class PlayerService(PlayerStatus):
                 await msg_carregando.edit(
                     embed=embed_erro(f'❌ Não consegui baixar o áudio de **{titulo}**. Pulando...')
                 )
-                st.playlist_index = (st.playlist_index + 1) % len(playlist)
-                tentativas = 0
-                while (
-                    tentativas < len(playlist)
-                    and playlist[st.playlist_index].get('tocado', False)
-                ):
-                    st.playlist_index = (st.playlist_index + 1) % len(playlist)
-                    tentativas += 1
-                if tentativas >= len(playlist):
+                if not self._avancar_apos_falha(playlist):
                     await ctx.send(embed=embed_aviso('📋 Nenhuma música disponível para tocar.'))
                     st.is_playing_voice = False
                     return
@@ -615,7 +769,14 @@ class PlayerService(PlayerStatus):
             color=0x1DB954,
         )
         embed.set_thumbnail(url=video.get('thumbnail_url', ''))
-        embed.add_field(name='Posição', value=f'{st.playlist_index + 1}/{total}', inline=True)
+        if st.shuffle_mode and st.playlist_index in st.shuffle_playlist:
+            posicao = st.shuffle_playlist.index(st.playlist_index) + 1
+            posicao_texto = f'{posicao}/{len(st.shuffle_playlist)} 🔀'
+        elif total:
+            posicao_texto = f'{st.playlist_index + 1}/{total}'
+        else:
+            posicao_texto = 'Fora da fila'
+        embed.add_field(name='Posição', value=posicao_texto, inline=True)
         embed.add_field(name='Volume', value=f'{int(st.voice_volume * 100)}%', inline=True)
         embed.add_field(
             name='Shuffle', value='🔀 Ligado' if st.shuffle_mode else 'Desligado', inline=True
@@ -633,10 +794,13 @@ class PlayerService(PlayerStatus):
 
     async def atualizar_status_agora(self, ctx) -> None:
         """Força a atualização imediata do card (ex: após pausar, mudar volume/repeat)."""
-        if not self._current_video:
-            return
-        embed = self._construir_embed_tocando(self._current_video, self._current_total, self.state)
-        await self._get_status_message(ctx, embed)
+        async with self._panel_refresh_lock:
+            if not self._current_video:
+                return
+            embed = self._construir_embed_tocando(
+                self._current_video, self._current_total, self.state
+            )
+            await self._get_status_message(ctx, embed)
 
     async def marcar_parado(self, ctx) -> None:
         """Atualiza o card de status para refletir que a reprodução foi parada."""
@@ -667,11 +831,8 @@ class PlayerService(PlayerStatus):
                 await asyncio.sleep(PROGRESS_UPDATE_INTERVAL_SECONDS)
                 if not self.state.is_playing_voice or not self._current_video:
                     break
-                embed = self._construir_embed_tocando(
-                    self._current_video, self._current_total, self.state
-                )
                 try:
-                    await self._get_status_message(ctx, embed)
+                    await self.atualizar_status_agora(ctx)
                 except discord.HTTPException as e:
                     logger.debug(f'[PROGRESS] falha ao atualizar progresso: {e}')
         except asyncio.CancelledError:
@@ -702,6 +863,8 @@ class PlayerService(PlayerStatus):
         if not playlist:
             st.is_playing_voice = False
             await ctx.send(embed=embed_aviso('📋 Playlist terminou!'))
+            await self.marcar_parado(ctx)
+            await self._atualizar_mensagem_playlist(ctx, [], 0)
             return
 
         if st.shuffle_mode:
@@ -721,6 +884,8 @@ class PlayerService(PlayerStatus):
                 await ctx.send(
                     embed=embed_aviso('📋 Playlist terminou! Use `&tocar` para recomeçar.')
                 )
+                await self.marcar_parado(ctx)
+                await self._atualizar_mensagem_playlist(ctx, playlist, st.playlist_index)
                 return
             while (
                 st.playlist_index < len(playlist)
@@ -740,6 +905,8 @@ class PlayerService(PlayerStatus):
                 await ctx.send(
                     embed=embed_aviso('📋 Playlist terminou! Use `&tocar` para recomeçar.')
                 )
+                await self.marcar_parado(ctx)
+                await self._atualizar_mensagem_playlist(ctx, playlist, st.playlist_index)
                 return
 
         await self.tocar_atual(ctx)

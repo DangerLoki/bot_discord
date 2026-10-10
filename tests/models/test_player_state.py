@@ -47,3 +47,17 @@ class TestRastreioTempo:
         player_state.iniciar_rastreio_tempo(180)
         player_state.retomar_rastreio()
         assert player_state._playback_paused_at is None
+
+
+def test_serializacao_preserva_ordem_do_shuffle():
+    estado = PlayerState(guild_id=123)
+    estado.shuffle_mode = True
+    estado.shuffle_playlist = [2, 0, 1]
+    estado.shuffle_index = 1
+
+    restaurado = PlayerState(guild_id=123)
+    restaurado.from_dict(estado.to_dict())
+
+    assert restaurado.shuffle_mode is True
+    assert restaurado.shuffle_playlist == [2, 0, 1]
+    assert restaurado.shuffle_index == 1

@@ -157,6 +157,7 @@ class PlaylistAddBulk:
         embed.add_field(name='📊 Total na fila', value=str(len(playlist)), inline=True)
         embed.set_footer(text=f'Adicionado por {ctx.author} · via Spotify → YouTube')
         await msg.edit(embed=embed)
+        await self._atualizar_painel(ctx)
         self._agendar_limpeza_confirmacao(ctx, msg)
 
     # ------------------------------------------------------------------
@@ -215,4 +216,5 @@ class PlaylistAddBulk:
         embed.add_field(name='📊 Total na fila', value=str(len(playlist)), inline=True)
         embed.set_footer(text=f'Adicionado por {ctx.author}')
         await msg.edit(embed=embed)
+        await self._atualizar_painel(ctx)
         self._agendar_limpeza_confirmacao(ctx, msg)

@@ -147,6 +147,7 @@ async def main() -> None:
             repo=repo,
             yt=yt,
             playlist_svc=playlist_svc,
+            config_repo=config_repo,
             service_resolver=get_or_create_guild_services,
         )
         playlist_svc.player_svc = player_svc

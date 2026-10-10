@@ -35,10 +35,6 @@ class PlaylistAdd:
             await msg.delete()
         except (discord.NotFound, discord.HTTPException):
             pass
-        player_svc = getattr(self, 'player_svc', None)
-        if player_svc:
-            playlist = self.repo.load(self.state.guild_id)
-            await player_svc._atualizar_mensagem_playlist(ctx, playlist, self.state.playlist_index)
 
     # ------------------------------------------------------------------
     # Dispatch — decide o tipo de entrada (vídeo, playlist, Spotify, busca)
@@ -163,6 +159,7 @@ class PlaylistAdd:
             embed.add_field(name='Posição na Playlist', value=str(registro['posicao']), inline=True)
         embed.set_footer(text='Vídeo adicionado com sucesso! ✅')
         await msg.edit(embed=embed)
+        await self._atualizar_painel(ctx)
         self._agendar_limpeza_confirmacao(ctx, msg)
 
     # ------------------------------------------------------------------
