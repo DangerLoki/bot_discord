@@ -1,406 +1,370 @@
+[![CI](https://github.com/DangerLoki/bot_discord/actions/workflows/ci.yml/badge.svg)](https://github.com/DangerLoki/bot_discord/actions/workflows/ci.yml)
 [![Build](https://github.com/DangerLoki/bot_discord/actions/workflows/build.yml/badge.svg)](https://github.com/DangerLoki/bot_discord/actions/workflows/build.yml)
 
 # Loki Bot — Discord Music Bot
 
-Bot Discord para reprodução de áudio do YouTube em canais de voz, com gerenciamento de playlist, modo aleatório com seed, modo de repetição, integração Spotify e diagnóstico de performance.
+Bot de música para Discord com reprodução de áudio do YouTube, importação do Spotify, painel interativo e filas isoladas por servidor.
 
----
+## Funcionalidades
 
-## ⬇️ Download
+- Reprodução de áudio do YouTube com yt-dlp e FFmpeg.
+- Pesquisa por texto e adição por URL ou ID.
+- Importação de playlists do YouTube e de faixas, álbuns e playlists do Spotify.
+- Painel persistente com controles de reprodução, volume, shuffle e repetição.
+- Fila paginada com botões para adicionar, inverter e limpar músicas.
+- Modal para adicionar músicas sem digitar uma mensagem no canal.
+- Estado, configurações e playlist independentes para cada servidor.
+- Persistência do volume, posição, canal do painel, shuffle e modo de repetição.
+- Detecção de lives, restrições geográficas e bloqueios do YouTube.
+- Cache local de áudio com limpeza automática de arquivos órfãos.
+- Suporte a cookies Netscape e proxy no yt-dlp.
+- Healthcheck de FFmpeg, cache, cookies e Spotify.
+- Proteção contra duas instâncias do bot no mesmo diretório.
+- Logs rotativos e métricas de performance.
 
-Baixe o binário da última versão na página de [Releases](https://github.com/DangerLoki/bot_discord/releases):
+## Download
+
+Os binários da versão mais recente ficam na página de [Releases](https://github.com/DangerLoki/bot_discord/releases):
 
 | Plataforma | Arquivo |
 |---|---|
-| Linux (x86_64) | `bot-discord-linux` |
-| Windows (x64) | `bot-discord-windows.exe` |
+| Linux x86_64 | `bot-discord-linux` |
+| Windows x64 | `bot-discord-windows.exe` |
 
-> **Requisito externo:** [ffmpeg](https://ffmpeg.org/download.html) deve estar instalado e disponível no PATH.
+Os binários publicados pelo workflow de release já incluem o FFmpeg. Para executar pelo código-fonte, instale o FFmpeg separadamente.
 
----
+## Pré-requisitos
 
-## 🎯 Funcionalidades
+### Execução pelo código-fonte
 
-- ✅ Reprodução de áudio do YouTube em canais de voz (yt-dlp + FFmpeg)
-- ✅ Comandos com prefixo `&` e slash commands (`/`) sincronizados automaticamente
-- ✅ Painel de player com botões persistentes (play/pause, skip, anterior, shuffle, repeat, volume, parar/voltar)
-- ✅ Botão ➕ na mensagem da fila abre um modal para adicionar música sem precisar digitar no chat
-- ✅ Botão de parar funciona como toggle: pausa e sai da call (⏹️) / volta ao canal de quem clicou e retoma de onde parou (📞)
-- ✅ Mensagens de confirmação de adição (única ou em lote) se auto-apagam após 10s e atualizam a fila
-- ✅ Adição por URL, ID ou busca de texto
-- ✅ Importação de playlists completas do YouTube
-- ✅ Links de YouTube Mix adicionam apenas o vídeo selecionado (não a fila gerada)
-- ✅ Lives bloqueadas — não é possível adicionar transmissões ao vivo
-- ✅ Integração Spotify — track, álbum e playlist (busca automaticamente no YouTube)
-- ✅ Gerenciamento de fila: remover, promover, inverter, limpar, paginar
-- ✅ Modo aleatório com `shuffle_id` único por sessão
-- ✅ Modo repetir: música atual 🔂, playlist inteira 🔁 ou desligado
-- ✅ Flag `tocado` para evitar repetição no mesmo ciclo
-- ✅ Detecção automática da primeira música não tocada ao reiniciar
-- ✅ Controle de volume em tempo real
-- ✅ Detecção e remoção automática de vídeos com geo-bloqueio
-- ✅ Detecção de bot-block do YouTube (incluindo HTTP 403) com parada automática e mensagem de erro
-- ✅ Mensagens amigáveis para erros de uso de comando (argumento faltando, entrada inválida)
-- ✅ Cache local com limpeza automática após reprodução
-- ✅ Suporte a proxy e cookies personalizados
-- ✅ Setup interativo do token via CLI na primeira execução
-- ✅ Logging estruturado com métricas de performance (`[PERF]`)
+- Python 3.11 ou superior.
+- FFmpeg disponível no `PATH`.
+- Node.js disponível no `PATH` para o runtime JavaScript usado pelo yt-dlp.
+- Um bot criado no [Discord Developer Portal](https://discord.com/developers/applications).
 
----
-
-## 🏗️ Arquitetura
-
-O projeto adota a estrutura **Cogs + Services + Repository**, com injeção de dependência manual em `main.py`.
-
-```
-src/
-├── cogs/
-│   ├── music_cog.py            # Comandos de voz: entrar, tocar, skip, pausar, volume, repetir…
-│   └── playlist_cog.py         # Comandos de fila: add, playlist, spotify, remove, promover, inverter, aleatorio, dado…
-│
-├── services/
-│   ├── player_service.py       # Lógica de reprodução, presença e auto-next
-│   ├── player_status.py        # Loop de status/presença herdado por PlayerService
-│   ├── playlist_service.py     # Fachada da fila (compõe os mixins abaixo)
-│   ├── playlist_add.py         # Adição: URL, busca, playlist YouTube
-│   ├── playlist_add_bulk.py    # Adição em lote: Spotify (track/álbum/playlist) e playlist YouTube
-│   ├── playlist_manage.py      # Remoção, promoção, inversão, limpeza
-│   ├── playlist_nav.py         # Navegação sequencial e aleatória (pular/voltar)
-│   ├── playlist_resolver.py    # Resolve entrada ambígua por título (remove/promover)
-│   ├── youtube_service.py      # Download e extração de playlist (yt-dlp)
-│   ├── youtube_search.py       # Metadados e busca textual herdados por YouTubeService
-│   ├── spotify_service.py      # Track, álbum, playlist (consultas)
-│   └── spotify_client.py       # Auth, requisições REST e fallback via embed HTML
-│
-├── models/
-│   └── player_state.py         # Estado mutável do player (volume, índice, shuffle, repeat_mode…)
-│
-├── repositories/
-│   └── playlist_repository.py  # load() / save() do playlist.json
-│
-├── ui/
-│   └── pagination.py           # View de paginação da playlist
-│
-├── setup/
-│   └── cli_setup.py            # Setup interativo do config.env e checagem do ffmpeg
-│
-├── utils/
-│   ├── __init__.py             # Re-exporta todos os helpers
-│   ├── embeds.py               # embed_erro, embed_aviso, embed_sucesso, embed_carregando
-│   ├── formatters.py           # formatar_duracao, extrair_video_id, is_spotify_url…
-│   └── errors.py               # GeoBlockedError, BotBlockedError e helpers de detecção
-│
-└── logger.py                   # Configuração de logging (rotação, console, arquivo)
-
-main.py                         # Wiring: instancia infra, serviços e registra cogs
-```
-
-### Fluxo de Dependências
-
-```
-main.py
- ├── PlayerState            (estado mutável compartilhado)
- ├── PlaylistRepository     (persistência JSON)
- ├── YouTubeService         (yt-dlp)
- ├── SpotifyService         (API Spotify)
- ├── PlaylistService  ←── repo + yt + spotify + state
- ├── PlayerService    ←── state + repo + yt + playlist_svc
- ├── MusicCog         ←── bot + state + repo + player_svc + playlist_svc
- └── PlaylistCog      ←── bot + state + repo + playlist_svc
-```
-
----
-
-## 💾 Stack
-
-| Camada | Tecnologia |
-|---|---|
-| Runtime | Python 3.11+ |
-| Discord | discord.py (com suporte a voz e hybrid/slash commands) |
-| Áudio | yt-dlp + FFmpeg |
-| Voz | PyNaCl |
-| Spotify | spotipy + requests |
-| Config | python-dotenv |
-| Container | Docker + Compose |
-
----
-
-## 📦 Pré-requisitos
-
-- Python 3.11+
-- FFmpeg no PATH
-- Node.js (para PO Token do YouTube via yt-dlp)
+Valide as dependências locais:
 
 ```bash
+python3 --version
 ffmpeg -version
 node --version
 ```
 
----
+No Discord Developer Portal, habilite o **Message Content Intent**. Ao convidar o bot, use os escopos `bot` e `applications.commands` e conceda, no mínimo, permissões para ver canais, enviar mensagens, incorporar links, ler o histórico, conectar e falar. A permissão para gerenciar mensagens é necessária para a limpeza automática do canal do painel e para `&limparchat`.
 
-## 🚀 Como executar
+## Instalação e execução
 
-### Bootstrap inicial (Linux)
+### Bootstrap no Linux
 
-Para preparar o ambiente do zero (venv, dependências, pastas e setup interativo):
+O script Bash cria o ambiente virtual, instala as dependências, prepara os diretórios e executa a configuração interativa:
 
 ```bash
+git clone https://github.com/DangerLoki/bot_discord.git
+cd bot_discord
 chmod +x bootstrap.sh
 ./bootstrap.sh
+.venv/bin/python main.py
 ```
 
-Se você usa Fish:
+Para usar uma versão específica do Python ou pular o assistente de configuração:
+
+```bash
+PYTHON_BIN=python3.11 ./bootstrap.sh
+SKIP_SETUP=1 ./bootstrap.sh
+```
+
+Quem usa Fish pode executar:
 
 ```fish
 chmod +x bootstrap.fish
 ./bootstrap.fish
 ```
 
-Ao final, o script pergunta se você quer iniciar o bot no mesmo terminal.
-Se você abrir o `bootstrap.fish` por clique no gerenciador de arquivos, ele tenta abrir um terminal automaticamente e iniciar o bot.
-
-Opções úteis:
-
-```bash
-# Usar uma versão específica do Python
-PYTHON_BIN=python3.11 ./bootstrap.sh
-
-# Pular setup interativo (útil em CI)
-SKIP_SETUP=1 ./bootstrap.sh
-```
-
-No Fish, use:
+O bootstrap Fish pergunta se deve iniciar o bot ao final. Também aceita execução automática em primeiro ou segundo plano:
 
 ```fish
-env PYTHON_BIN=python3.11 ./bootstrap.fish
-env SKIP_SETUP=1 ./bootstrap.fish
 env RUN_BOT=1 ./bootstrap.fish
 env RUN_BOT=1 RUN_BOT_BG=1 ./bootstrap.fish
-```
-
-Para finalizar o bot (especialmente quando estiver em segundo plano):
-
-```fish
-chmod +x stop_bot.fish
 ./stop_bot.fish
 ```
 
-### Opção 1 — Python direto
+### Instalação manual com `venv`
 
 ```bash
 git clone https://github.com/DangerLoki/bot_discord.git
 cd bot_discord
 
-python -m venv .venv
-source .venv/bin/activate     # Linux/macOS
-# .venv\Scripts\activate      # Windows
+python3 -m venv .venv
+source .venv/bin/activate
+# No Windows: .venv\Scripts\activate
 
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 python main.py
 ```
 
-Na primeira execução, o bot solicita interativamente o token do Discord (e cria o `config.env`) caso ele ainda não exista.
+Na primeira execução, o assistente solicita o token do Discord e cria o `config.env`.
 
-### Opção 2 — Docker
+### Docker Compose
+
+Crie o `config.env` antes de iniciar o contêiner:
 
 ```bash
 git clone https://github.com/DangerLoki/bot_discord.git
 cd bot_discord
 
-# configure o config.env antes de subir
-docker compose up -d
-
-docker compose logs -f        # acompanhar logs
-docker compose down           # parar
+docker compose up -d --build
+docker compose logs -f
 ```
 
-### Opção 3 — Binário pré-compilado
+Para encerrar:
 
-Baixe o binário em [Releases](https://github.com/DangerLoki/bot_discord/releases), coloque o `config.env` no mesmo diretório e execute:
+```bash
+docker compose down
+```
+
+Os diretórios `data/`, `cache/`, `config/` e `logs/` são montados como volumes para preservar os dados.
+
+### Binário pré-compilado
+
+Baixe o arquivo da sua plataforma e execute-o em um diretório com permissão de escrita:
 
 ```bash
 # Linux
 chmod +x bot-discord-linux
 ./bot-discord-linux
 
-# Windows
-bot-discord-windows.exe
+# Windows (PowerShell)
+.\bot-discord-windows.exe
 ```
 
-### ⚙️ Configuração (`config.env`)
+Mantenha `config.env` e a pasta `config/` junto do executável.
+
+## Configuração
+
+O arquivo `config.env` aceita estas variáveis:
 
 ```env
+# Obrigatório
 token_discord=SEU_TOKEN_AQUI
 
-# Opcional
-ytdlp_proxy=               # ex: socks5://127.0.0.1:1080
-spotify_client_id=         # https://developer.spotify.com/dashboard
+# Opcionais
+ytdlp_proxy=
+spotify_client_id=
 spotify_client_secret=
 ```
 
-### 🔐 Cookies (recomendado)
+As credenciais do Spotify podem ser criadas no [Spotify for Developers](https://developer.spotify.com/dashboard). Sem elas, somente a integração com Spotify fica indisponível.
 
-O YouTube pode bloquear downloads exigindo autenticação. Para evitar isso, exporte os cookies do navegador onde você está logado e salve em:
+Para refazer o assistente de configuração:
 
+```bash
+python -m src.setup.cli_setup --force
 ```
+
+> Nunca envie `config.env` ou cookies para o repositório. Ambos podem conter credenciais de acesso.
+
+### Cookies do YouTube
+
+Se o YouTube exigir autenticação ou bloquear os downloads, exporte os cookies de uma sessão válida no formato Netscape para:
+
+```text
 config/cookies.txt
 ```
 
+Há um modelo em `config/cookies.txt.example`. Também é possível exportar diretamente com o yt-dlp:
+
 ```bash
-# Exportar direto via yt-dlp (requer Chrome/Firefox instalado)
 yt-dlp --cookies-from-browser chrome --cookies config/cookies.txt \
   -o /dev/null "https://www.youtube.com"
 ```
 
----
+## Primeiros passos no Discord
 
-## 📋 Comandos
+1. Convide o bot para o servidor e inicie o processo.
+2. No canal de texto que será usado como painel, execute `&definircanal`.
+3. Entre em um canal de voz.
+4. Use `&add <URL ou busca>` e depois `&tocar`.
 
-Todos os comandos aceitam tanto o prefixo `&` quanto slash commands (`/`). Use `&help` para a lista completa dentro do Discord.
+Depois de definido, os comandos ficam restritos ao canal do painel. O bot restaura esse canal e recria os controles persistentes ao reiniciar.
 
-### 🎵 Playlist
+## Comandos
 
-| Comando | Aliases | Descrição |
-|---|---|---|
-| `&add <url\|busca>` | — | URL do YouTube, playlist, URL do Spotify ou texto de busca |
-| `&playlist <url>` | `&pl` `&addplaylist` | Importa playlist/Mix do YouTube |
-| `&spotify <url>` | `&sp` `&addspotify` | Adiciona track, álbum ou playlist do Spotify |
-| `&listar` | — | Lista a fila com paginação |
-| `&remove <pos\|id>` | `&rm` `&remover` `&delete` | Remove por posição, video_id ou título |
-| `&promover <pos\|id\|nome>` | `&promote` `&proxima` `&boost` | Move para próxima posição |
-| `&inverter` | `&reverse` `&invert` `&flip` | Inverte a ordem da playlist |
-| `&limpar` | `&clear` `&clearall` `&limpartudo` | Limpa toda a playlist |
+Os comandos híbridos aceitam o prefixo `&` e também aparecem como slash commands (`/`). O comando `repetir` é a exceção atual e funciona apenas pelo prefixo. Use `&help` para consultar a lista dentro do Discord.
 
-### 🔊 Reprodução de Voz
+### Playlist
 
 | Comando | Aliases | Descrição |
 |---|---|---|
-| `&entrar` | `&join` `&connect` `&entra` | Entra no canal de voz do usuário |
-| `&tocar` | `&play` `&start` | Inicia reprodução (auto-join se necessário) |
-| `&pausar` | `&pause` | Pausa o áudio |
-| `&retomar` | `&resume` `&continuar` | Retoma o áudio pausado |
-| `&parar` | `&stop` | Para sem sair da call |
-| `&sair` | `&leave` `&disconnect` `&dc` | Para e sai da call |
-| `&skip` | `&pular` `&next` | Pula para o próximo |
-| `&previous` | `&voltar` `&anterior` | Volta ao vídeo anterior |
-| `&recomecar` | `&restart` `&replay` `&reiniciar` | Recomeça a música atual |
-| `&volume <0-200>` | `&vol` `&v` | Ajusta o volume (padrão: 25%) |
-| `&tocando` | `&np` `&nowplaying` `&atual` | Mostra o que está tocando |
-| `&help` | `&ajuda` `&comandos` `&cmds` | Lista todos os comandos |
+| `&add <url\|busca>` | — | Adiciona vídeo, playlist do YouTube, link do Spotify ou resultado de busca. |
+| `&playlist <url>` | `&pl`, `&addplaylist` | Importa uma playlist do YouTube. |
+| `&spotify <url>` | `&sp`, `&addspotify` | Adiciona faixa, álbum ou playlist do Spotify. |
+| `&listar` | — | Exibe a fila com paginação. |
+| `&remove <posição\|id\|nome>` | `&rm`, `&remover`, `&delete` | Remove uma música da fila. |
+| `&promover <posição\|id\|nome>` | `&promote`, `&proxima`, `&boost` | Move uma música para a próxima posição. |
+| `&inverter` | `&reverse`, `&invert`, `&flip` | Inverte a ordem da fila. |
+| `&limpar` | `&clear`, `&clearall`, `&limpartudo` | Limpa a fila do servidor. |
 
-### 🔁 Repetição
+### Reprodução
 
 | Comando | Aliases | Descrição |
 |---|---|---|
-| `&repetir` | `&repeat` `&loop` | Alterna entre: desligado → 🔂 música → 🔁 playlist |
-| `&repetir musica` | — | Repete a música atual indefinidamente |
-| `&repetir playlist` | — | Repete a playlist inteira em loop |
-| `&repetir off` | — | Desliga a repetição |
+| `&entrar` | `&join`, `&connect`, `&entra` | Entra no canal de voz do usuário. |
+| `&tocar` | `&play`, `&start` | Inicia a reprodução e entra automaticamente na call. |
+| `&pausar` | `&pause` | Pausa o áudio. |
+| `&retomar` | `&resume`, `&continuar` | Retoma o áudio pausado. |
+| `&parar` | `&stop` | Para o áudio sem sair da call. |
+| `&sair` | `&leave`, `&disconnect`, `&dc` | Para o áudio e sai da call. |
+| `&skip` | `&pular`, `&next` | Avança para a próxima música. |
+| `&previous` | `&voltar`, `&anterior` | Retorna à música anterior. |
+| `&recomecar` | `&restart`, `&replay`, `&reiniciar` | Reinicia a música atual. |
+| `&volume [0-200]` | `&vol`, `&v` | Consulta ou ajusta o volume; o padrão é 25%. |
+| `&tocando` | `&np`, `&nowplaying`, `&atual` | Mostra a música atual. |
+| `&help` | `&ajuda`, `&comandos`, `&cmds` | Lista os comandos disponíveis. |
 
-### 🔀 Shuffle
+### Modos de reprodução
 
 | Comando | Aliases | Descrição |
 |---|---|---|
-| `&aleatorio` | `&shuffle` `&random` `&embaralhar` | Liga/desliga modo aleatório com `shuffle_id` |
+| `&aleatorio` | `&shuffle`, `&random`, `&embaralhar` | Ativa ou desativa a ordem aleatória. |
+| `&repetir` | `&repeat`, `&loop` | Alterna entre desligado, música atual e playlist. |
+| `&repetir musica` | — | Repete a música atual. |
+| `&repetir playlist` | — | Repete a playlist inteira. |
+| `&repetir off` | — | Desativa a repetição. |
 
-### 🎲 Diversão
+### Configuração e diagnóstico
 
-| Comando | Descrição |
-|---|---|
-| `&dado [lados]` | Lança um dado (padrão: 20 lados) |
+| Comando | Aliases | Descrição |
+|---|---|---|
+| `&definircanal [#canal]` | `&setcanal`, `&canalbot` | Define o canal do painel; usa o canal atual se omitido. |
+| `&limparchat [1-100]` | `&clearchat`, `&purge` | Limpa mensagens do canal; o padrão é 50. |
+| `&healthcheck` | `&health`, `&diag`, `&status` | Verifica FFmpeg, cache, cookies e Spotify. |
+| `&dado [lados]` | — | Lança um dado; o padrão é 20 lados. |
 
----
+## Painel e shuffle
 
-## 🎲 Sistema de Shuffle
+O painel possui controles persistentes para voltar, pausar/retomar, avançar, parar/sair, shuffle, repetição e volume. O botão de parada funciona como um toggle: ele pausa e sai da call; quando acionado novamente, reconecta ao canal do usuário e retoma a faixa.
 
-1. **Ao ativar** `&aleatorio`:
-   - Gera um `shuffle_id` único de 8 caracteres
-   - Cria lista aleatória com os vídeos ainda não tocados
+Na mensagem da fila, os botões permitem navegar pelas páginas, inverter a ordem, abrir o modal de adição e limpar a playlist.
 
-2. **Ao adicionar vídeos com shuffle ativo**:
-   - O novo vídeo entra em posição aleatória, preservando os demais
+Ao ativar o shuffle, o bot cria um `shuffle_id` para a sessão e mantém uma ordem aleatória independente da posição original. Novas músicas entram em uma posição aleatória sem reordenar as demais. A propriedade `tocado` impede repetições no mesmo ciclo.
 
-3. **`&listar` em modo shuffle**:
-   - Exibe a ordem aleatória com `posicao_shuffle` e `shuffle_id` no footer
+## Persistência por servidor
 
-4. **Dados salvos por vídeo**:
+Cada guild possui seu próprio diretório:
+
+```text
+data/
+└── guilds/
+    └── <guild_id>/
+        ├── config.json
+        └── playlist.json
+```
+
+`config.json` armazena o canal do painel e o estado persistível do player. `playlist.json` contém a fila daquele servidor. Um item possui uma estrutura semelhante a:
 
 ```json
 {
   "video_id": "dFlDRhvM4L0",
-  "titulo": "...",
-  "tocado": true,
-  "shuffle_id": "abc1def2",
-  "posicao_shuffle": 3
+  "titulo": "Título da música",
+  "duracao": 90,
+  "duracao_formatada": "01:30",
+  "canal": "Nome do canal",
+  "embed_url": "https://www.youtube.com/watch?v=dFlDRhvM4L0",
+  "thumbnail_url": "https://img.youtube.com/vi/dFlDRhvM4L0/hqdefault.jpg",
+  "adicionado_por": "usuario",
+  "data_adicionado": "2026-10-10 12:00:00",
+  "posicao": 1,
+  "tocado": false,
+  "fonte": "youtube"
 }
 ```
 
----
+Itens originados do Spotify também podem conter `spotify_titulo_original`. Quando o shuffle está ativo, são usados `shuffle_id` e `posicao_shuffle`.
 
-## 📊 Estrutura do `playlist.json`
+## Arquitetura
 
-```json
-[
-  {
-    "video_id": "dFlDRhvM4L0",
-    "titulo": "チェンソーマン OP",
-    "duracao": 90,
-    "duracao_formatada": "01:30",
-    "canal": "MAPPA CHANNEL",
-    "embed_url": "https://www.youtube.com/watch?v=dFlDRhvM4L0",
-    "thumbnail_url": "https://img.youtube.com/vi/dFlDRhvM4L0/hqdefault.jpg",
-    "adicionado_por": "user#0000",
-    "data_adicionado": "2026-04-04 16:59:54",
-    "posicao": 1,
-    "tocado": false,
-    "fonte": "spotify",
-    "spotify_titulo_original": "KICK BACK"
-  }
-]
+O projeto usa Cogs, Services e Repositories com injeção manual de dependências em `main.py`:
+
+```text
+main.py
+└── src/
+    ├── cogs/
+    │   ├── cog_utils.py
+    │   ├── diagnostic_cog.py
+    │   ├── music_cog.py
+    │   └── playlist_cog.py
+    ├── models/
+    │   └── player_state.py
+    ├── repositories/
+    │   ├── config_repository.py
+    │   └── playlist_repository.py
+    ├── services/
+    │   ├── player_service.py
+    │   ├── player_status.py
+    │   ├── playlist_service.py
+    │   ├── playlist_add.py
+    │   ├── playlist_add_bulk.py
+    │   ├── playlist_manage.py
+    │   ├── playlist_nav.py
+    │   ├── playlist_resolver.py
+    │   ├── spotify_client.py
+    │   ├── spotify_service.py
+    │   ├── youtube_search.py
+    │   └── youtube_service.py
+    ├── setup/
+    │   └── cli_setup.py
+    ├── ui/
+    │   ├── pagination.py
+    │   └── player_controls.py
+    └── utils/
+        ├── cache_manager.py
+        ├── embeds.py
+        ├── errors.py
+        ├── formatters.py
+        ├── healthcheck.py
+        └── retry.py
 ```
 
----
+`main.py` mantém um `PlayerState`, um `PlaylistService` e um `PlayerService` para cada guild. Os clientes de YouTube e Spotify, os repositórios e o gerenciador de cache são compartilhados, sempre recebendo o `guild_id` nas operações que precisam de isolamento.
 
-## 📝 Logging e Diagnóstico
+## Desenvolvimento
 
-Logs completos em `logs/bot.log` (rotação: 5 MB × 3 arquivos).
-Console mostra nível INFO; arquivo registra DEBUG completo.
+O projeto usa [uv](https://docs.astral.sh/uv/) no CI e mantém um `uv.lock`:
 
-### Tags de performance (`[PERF]`)
+```bash
+uv sync --group dev
+uv run ruff check .
+uv run pytest
+uv run pytest --cov=src --cov-report=term-missing
+```
 
-| Tag | O que mede |
+Também é possível instalar as dependências de execução com `requirements.txt`, mas as ferramentas de lint, teste e build estão no grupo `dev` do `pyproject.toml`.
+
+O CI executa Ruff, pytest com cobertura e um smoke test do binário Linux. Releases são geradas automaticamente ao enviar uma tag no formato `v*`.
+
+## Logs e diagnóstico
+
+O console exibe mensagens de nível INFO e o arquivo `logs/bot.log` registra DEBUG. A rotação mantém três backups de até 5 MB cada.
+
+Tags úteis:
+
+| Tag | Informação |
 |---|---|
-| `[PERF][DOWNLOAD]` | Tempo e tamanho do download via yt-dlp |
-| `[PERF][INFO]` | Tempo para obter metadados de um vídeo |
-| `[PERF][BUSCA]` | Tempo de busca no YouTube |
-| `[PERF][PLAYLIST]` | Tempo para extrair playlist/Mix completo |
-| `[PERF][TOCAR]` | Tempo total do comando até início da reprodução |
-| `[PERF][ADD_URL]` | Tempo total do fluxo `&add <url>` |
-| `[PERF][SPOTIFY_TRACK]` | Tempo da chamada à API do Spotify |
-| `[CACHE][HIT]` | Música servida do cache (sem download) |
-| `[CACHE][MISS]` | Música ausente do cache, iniciou download |
+| `[PERF][DOWNLOAD]` | Tempo e tamanho do download. |
+| `[PERF][INFO]` | Tempo para obter metadados. |
+| `[PERF][BUSCA]` | Tempo e quantidade de resultados da busca. |
+| `[PERF][PLAYLIST]` | Tempo para extrair uma playlist. |
+| `[PERF][TOCAR]` | Tempo total até o início da reprodução. |
+| `[CACHE][HIT]` | Arquivo atendido pelo cache. |
+| `[CACHE][MISS]` | Download iniciado por ausência no cache. |
+| `[GUILD:<id>]` | Operação associada a um servidor. |
 
-### Exemplo de saída
+Use `&healthcheck` no Discord para verificar rapidamente as dependências críticas.
 
-```
-[CACHE][HIT]       usando arquivo em cache: cache/dFlDRhvM4L0.opus
-[PERF][DOWNLOAD]   video_id=abc123 tempo=8.42s tamanho=3.1MB
-[PERF][BUSCA]      termo="chainsaw man op" resultados=5 tempo=2.17s
-[PERF][TOCAR]      tempo total até início da reprodução: 9.03s
-[SHUFFLE]          ON (abc1def2) por user#0000
-[PROMOTE]          NORMAL abc123 ("Título") → posição 2
-```
-
----
-
-## 📄 Licença
+## Licença
 
 Projeto pessoal. Use livremente.
 
-## 👤 Autor
+## Autor
 
 **Loki** — Desenvolvedor
-
----
-
-**Status**: ✅ Em desenvolvimento ativo | Arquitetura Cogs + Services + Repository
