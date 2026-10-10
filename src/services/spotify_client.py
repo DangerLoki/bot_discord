@@ -1,4 +1,5 @@
 """Cliente de baixo nível para a API do Spotify e scraping do embed."""
+import asyncio
 import re
 
 import requests as _requests
@@ -43,6 +44,17 @@ class SpotifyAPIClient:
         except Exception as e:
             logger.error(f'[SPOTIFY] Erro ao autenticar: {e}')
             return None
+
+    async def get_token(self) -> str | None:
+        """Obtém um token válido sem bloquear o event loop."""
+
+        def _fetch_token():
+            sp = self._criar_cliente()
+            if not sp:
+                return None
+            return sp.auth_manager.get_access_token(as_dict=False)
+
+        return await asyncio.to_thread(_fetch_token)
 
     # ------------------------------------------------------------------
     # Request REST

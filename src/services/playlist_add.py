@@ -135,9 +135,13 @@ class PlaylistAdd:
             autor=str(ctx.author),
             extra={'posicao': len(playlist) + 1, 'url': url},
         )
-        playlist.append(registro)
-        self.repo.save(self.state.guild_id, playlist)
-        self._atualizar_shuffle_com_novo_video(len(playlist) - 1)
+        playlist, novos_indices = self.repo.add_unique(self.state.guild_id, [registro])
+        if not novos_indices:
+            await msg.edit(embed=embed_aviso('⚠️ Este vídeo já está na playlist.'))
+            return
+        novo_indice = novos_indices[0]
+        registro = playlist[novo_indice]
+        self._atualizar_shuffle_com_novo_video(novo_indice)
 
         elapsed = time.perf_counter() - t0
         logger.info(
@@ -211,4 +215,3 @@ class PlaylistAdd:
         await self.adicionar_por_url(
             ctx, f"https://www.youtube.com/watch?v={video['video_id']}", msg=msg
         )
-

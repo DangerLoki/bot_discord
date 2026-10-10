@@ -66,6 +66,19 @@ class PlaylistManage:
                 index = next((i for i, v in enumerate(playlist) if v.get('video_id') == video_id), None)
 
         video_id = video.get('video_id')
+        # A resolução por título pode aguardar uma interação. Revalida a fila
+        # para não sobrescrever alterações feitas enquanto aguardávamos.
+        playlist_atual = self.repo.load(self.state.guild_id)
+        index_atual = next(
+            (i for i, item in enumerate(playlist_atual) if item.get('video_id') == video_id),
+            None,
+        )
+        if index_atual is None:
+            await ctx.send('⚠️ Esse vídeo já foi removido da playlist.')
+            return
+        playlist = playlist_atual
+        index = index_atual
+        video = playlist[index]
         titulo = video.get('titulo') or 'Desconhecido'
         removendo_atual = index == st.playlist_index
 
@@ -81,7 +94,6 @@ class PlaylistManage:
             ]
 
         self.repo.save(self.state.guild_id, playlist)
-        self._cleanup_orphaned_cache()
 
         if len(playlist) == 0:
             st.playlist_index = 0
@@ -105,6 +117,18 @@ class PlaylistManage:
             )
         embed.set_footer(text=f'Removido por {ctx.author}')
         await ctx.send(embed=embed)
+
+        if removendo_atual and self.player_svc:
+            vc = st.voice_client
+            if not playlist:
+                st.is_playing_voice = False
+                if vc and (vc.is_playing() or vc.is_paused()):
+                    vc.stop()
+                await self.player_svc.marcar_parado(ctx)
+            elif vc and vc.is_connected():
+                await self.player_svc.tocar_atual(ctx)
+
+        self._cleanup_orphaned_cache()
 
     # ------------------------------------------------------------------
     # Promoção
@@ -175,6 +199,19 @@ class PlaylistManage:
                     return
 
         video_id = video.get('video_id')
+        # Uma escolha por título pode levar vários segundos. Trabalha sobre a
+        # versão mais recente da fila para preservar inclusões concorrentes.
+        playlist_atual = self.repo.load(self.state.guild_id)
+        index_atual = next(
+            (i for i, item in enumerate(playlist_atual) if item.get('video_id') == video_id),
+            None,
+        )
+        if index_atual is None:
+            await ctx.send('⚠️ Esse vídeo não está mais na playlist.')
+            return
+        playlist = playlist_atual
+        index_video = index_atual
+        video = playlist[index_video]
         if index_video == st.playlist_index:
             await ctx.send('⚠️ Este vídeo já está tocando.')
             return
@@ -329,4 +366,3 @@ class PlaylistManage:
         )
         embed.set_footer(text=f'Limpa por {ctx.author}')
         await ctx.send(embed=embed)
-

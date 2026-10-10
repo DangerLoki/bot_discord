@@ -102,7 +102,7 @@ class PlaylistAddBulk:
         adicionados, falhas = 0, 0
         playlist = self.repo.load(self.state.guild_id)
         ids_existentes = {v['video_id'] for v in playlist}
-        novos_indices = []
+        novos_registros = []
 
         for i, track in enumerate(tracks, 1):
             termo = f"{track['artista']} {track['titulo']}"
@@ -129,7 +129,7 @@ class PlaylistAddBulk:
                     },
                 )
                 playlist.append(reg)
-                novos_indices.append(len(playlist) - 1)
+                novos_registros.append(reg)
                 ids_existentes.add(vid_id)
                 adicionados += 1
                 if i % 10 == 0 or i == total:
@@ -144,7 +144,10 @@ class PlaylistAddBulk:
                 logger.error(f'[SPOTIFY] Erro ao adicionar faixa "{termo}": {e}')
                 falhas += 1
 
-        self.repo.save(self.state.guild_id, playlist)
+        playlist, novos_indices = self.repo.add_unique(
+            self.state.guild_id, novos_registros
+        )
+        adicionados = len(novos_indices)
         for idx in novos_indices:
             self._atualizar_shuffle_com_novo_video(idx)
 
@@ -179,7 +182,7 @@ class PlaylistAddBulk:
         )
 
         adicionados, duplicados = 0, 0
-        novos_indices = []
+        novos_registros = []
         for video in videos:
             if video['video_id'] in ids_existentes:
                 duplicados += 1
@@ -194,11 +197,15 @@ class PlaylistAddBulk:
                 extra={'posicao': len(playlist) + 1},
             )
             playlist.append(reg)
-            novos_indices.append(len(playlist) - 1)
+            novos_registros.append(reg)
             ids_existentes.add(video['video_id'])
             adicionados += 1
 
-        self.repo.save(self.state.guild_id, playlist)
+        playlist, novos_indices = self.repo.add_unique(
+            self.state.guild_id, novos_registros
+        )
+        duplicados += len(novos_registros) - len(novos_indices)
+        adicionados = len(novos_indices)
         for idx in novos_indices:
             self._atualizar_shuffle_com_novo_video(idx)
 

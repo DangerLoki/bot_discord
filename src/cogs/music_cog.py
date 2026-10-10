@@ -6,7 +6,7 @@ from discord.ext import commands
 
 from src.cogs.cog_utils import MultiGuildCog
 from src.logger import get_logger
-from src.models.player_state import RepeatMode, PlayerState
+from src.models.player_state import RepeatMode
 from src.repositories.config_repository import ConfigRepository
 from src.repositories.playlist_repository import PlaylistRepository
 
@@ -36,6 +36,14 @@ class MusicCog(MultiGuildCog, name='Música'):
         """Shortcut para pegar serviços do servidor."""
         playlist_svc, player_svc = self.get_services_from_ctx(ctx)
         return playlist_svc, player_svc
+
+    # Mantém os nomes usados pelos comandos. Esses aliases também deixam
+    # explícito que o estado/serviço é resolvido a partir da guild do contexto.
+    def _get_guild_state(self, ctx):
+        return self._get_state(ctx)
+
+    def _get_guild_services(self, ctx):
+        return self._get_services(ctx)
 
     # ------------------------------------------------------------------
     # Conexão
@@ -92,10 +100,12 @@ class MusicCog(MultiGuildCog, name='Música'):
         canal_alvo = canal or ctx.channel
         self._get_guild_state(ctx).player_channel_id = canal_alvo.id
         self.config_repo.set_valor(ctx.guild.id, 'player_channel_id', canal_alvo.id)
-        self._get_guild_services(ctx)[1].reset_status_message()
-        self._get_guild_services(ctx)[1].iniciar_limpeza_canal(canal_alvo)
+        player_svc = self._get_guild_services(ctx)[1]
+        player_svc.reset_status_message()
+        player_svc.iniciar_limpeza_canal(canal_alvo)
 
         await ctx.send(f'✅ Agora os comandos só são aceitos em {canal_alvo.mention}.')
+        await player_svc.garantir_painel(ctx)
         logger.info(f'[CANAL] canal de comandos definido: #{canal_alvo.name} ({canal_alvo.id})')
 
     @commands.hybrid_command(name='limparchat', aliases=['clearchat', 'purge'])
@@ -268,7 +278,7 @@ class MusicCog(MultiGuildCog, name='Música'):
         if not vc.is_playing() and not vc.is_paused():
             await ctx.send('❌ Nenhum áudio tocando no momento.')
             return
-        playlist = self.repo.load()
+        playlist = self.repo.load(ctx.guild.id)
         if not playlist:
             await ctx.send('❌ Playlist vazia.')
             return

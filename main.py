@@ -3,6 +3,7 @@ import atexit
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 # Garante que o bundle do PyInstaller encontre os certificados SSL
 try:
@@ -141,7 +142,13 @@ async def main() -> None:
 
         # Cria serviços para este servidor
         playlist_svc = PlaylistService(repo=repo, yt=yt, spotify=spotify, state=state, cache_mgr=cache_mgr)
-        player_svc = PlayerService(state=state, repo=repo, yt=yt, playlist_svc=playlist_svc)
+        player_svc = PlayerService(
+            state=state,
+            repo=repo,
+            yt=yt,
+            playlist_svc=playlist_svc,
+            service_resolver=get_or_create_guild_services,
+        )
         playlist_svc.player_svc = player_svc
 
         # Limpa cache orfão
@@ -188,9 +195,13 @@ async def main() -> None:
         except Exception as e:
             logger.error(f'[SLASH] Erro ao sincronizar slash commands: {e}')
 
-        # Registra views persistentes para todos os servidores (uma vez)
+        # Carrega estado/configuração de todas as guilds antes de restaurar o painel.
+        for guild in bot.guilds:
+            get_or_create_guild_services(guild.id)
+
+        # Uma única view roteada dinamicamente atende todas as guilds. Registrar
+        # várias views com os mesmos custom_id faria uma guild sobrescrever outra.
         if not getattr(bot, '_painel_view_registrada', False):
-            # Pega primeira guild para registrar views (funciona para todas)
             if guild_services:
                 _, player_svc = next(iter(guild_services.values()))
                 bot.add_view(player_svc.view)
@@ -205,6 +216,13 @@ async def main() -> None:
                 canal = bot.get_channel(state.player_channel_id)
                 if canal:
                     player_svc.iniciar_limpeza_canal(canal)
+                    painel_ctx = SimpleNamespace(
+                        guild=canal.guild,
+                        channel=canal,
+                        bot=bot,
+                        author=bot.user,
+                    )
+                    await player_svc.garantir_painel(painel_ctx)
                     logger.info(
                         f'[GUILD:{guild_id}] retomando canal de comandos: #{canal.name} ({canal.id})'
                     )
@@ -293,10 +311,8 @@ async def main() -> None:
         logger.error(f'[COMANDO] erro não tratado: {error}', exc_info=error)
 
     # --- Cogs ---
-    # Shared para cogs (multi-guild)
-    shared = dict(
-        repo=repo,
-        config_repo=config_repo,
+    # Dependências compartilhadas pelos cogs multi-guild.
+    guild_dependencies = dict(
         get_or_create_guild_services=get_or_create_guild_services,
         guild_states=guild_states,
     )
@@ -304,8 +320,10 @@ async def main() -> None:
     from src.cogs.music_cog import MusicCog
     from src.cogs.playlist_cog import PlaylistCog
 
-    await bot.add_cog(MusicCog(bot, **shared))
-    await bot.add_cog(PlaylistCog(bot, **shared))
+    await bot.add_cog(
+        MusicCog(bot, repo=repo, config_repo=config_repo, **guild_dependencies)
+    )
+    await bot.add_cog(PlaylistCog(bot, repo=repo, **guild_dependencies))
     await bot.add_cog(
         DiagnosticCog(
             bot,

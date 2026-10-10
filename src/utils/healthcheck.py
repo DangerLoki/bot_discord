@@ -52,7 +52,9 @@ class HealthCheck:
         if not spotify_service or not spotify_service.client_id:
             return False, 'Spotify não configurado (client_id ausente)'
         try:
-            await asyncio.wait_for(spotify_service.get_token(), timeout=5.0)
+            token = await asyncio.wait_for(spotify_service.get_token(), timeout=5.0)
+            if not token:
+                return False, 'Spotify: não foi possível obter token de autenticação'
             return True, 'Spotify OK: autenticação bem-sucedida'
         except asyncio.TimeoutError:
             return False, 'Spotify: timeout ao verificar autenticação'

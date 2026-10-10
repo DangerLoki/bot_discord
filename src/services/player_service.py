@@ -35,6 +35,7 @@ class PlayerService(PlayerStatus):
         repo: PlaylistRepository,
         yt: YouTubeService,
         playlist_svc: PlaylistService,
+        service_resolver=None,
     ) -> None:
         self.state = state
         self.repo = repo
@@ -47,8 +48,12 @@ class PlayerService(PlayerStatus):
         self._current_audio_path: str | None = None
         self._preservar_cache_ao_parar: bool = False
         self._playlist_scroll: int = 0
-        self.view = PlayerControlView(state, self, playlist_svc)
-        self.queue_view = PlaylistQueueView(state, self, playlist_svc)
+        self.view = PlayerControlView(
+            state, self, playlist_svc, service_resolver=service_resolver
+        )
+        self.queue_view = PlaylistQueueView(
+            state, self, playlist_svc, service_resolver=service_resolver
+        )
 
     # ------------------------------------------------------------------
     # Mensagem de status única (evita spam: edita sempre a mesma mensagem
@@ -160,6 +165,29 @@ class PlayerService(PlayerStatus):
         embed = self._construir_embed_playlist(playlist, indice_atual)
         await self._get_playlist_message(ctx, embed)
 
+    async def garantir_painel(self, ctx) -> None:
+        """Cria ou restaura o painel, inclusive quando a playlist está vazia."""
+        await self._preparar_canal_painel(ctx)
+        playlist = self.repo.load(self.state.guild_id)
+        await self._atualizar_mensagem_playlist(
+            ctx, playlist, self.state.playlist_index
+        )
+
+        if self._current_video:
+            await self.atualizar_status_agora(ctx)
+            return
+
+        embed = discord.Embed(
+            title='🎵 Painel de Música',
+            description=(
+                'Nenhuma música está tocando no momento.\n'
+                'Use o botão **➕** na fila acima para adicionar uma música.'
+            ),
+            color=0x5865F2,
+        )
+        embed.set_footer(text='Adicione uma música para começar.')
+        await self._get_status_message(ctx, embed)
+
     async def mudar_pagina_playlist(self, ctx, delta: int) -> None:
         """Rola a mensagem da fila para frente/trás em blocos de `PLAYLIST_MSG_LIMITE`."""
         playlist = self.repo.load(self.state.guild_id)
@@ -188,6 +216,15 @@ class PlayerService(PlayerStatus):
         except Exception as e:
             logger.error(f'[DOWNLOAD] falha após retry: {type(e).__name__}: {e}')
             return None
+
+    def _video_atual_persistido(self) -> tuple[list, dict | None]:
+        """Retorna a versão atual da fila e o item apontado pelo estado."""
+        playlist = self.repo.load(self.state.guild_id)
+        if not playlist:
+            return playlist, None
+        if self.state.playlist_index >= len(playlist):
+            self.state.playlist_index = 0
+        return playlist, playlist[self.state.playlist_index]
 
 
     async def _preparar_canal_painel(self, ctx) -> None:
@@ -344,6 +381,14 @@ class PlayerService(PlayerStatus):
                 st.playlist_index = st.playlist_index % len(playlist)
                 continue
             except asyncio.TimeoutError:
+                playlist_atual, video_atual = self._video_atual_persistido()
+                if not playlist_atual:
+                    st.is_playing_voice = False
+                    await msg_carregando.edit(embed=embed_aviso('📋 Playlist vazia.'))
+                    return
+                if video_atual.get('video_id') != video_id:
+                    logger.info(f'[TOCAR] ignorando timeout de download obsoleto: {video_id}')
+                    continue
                 falhas_consecutivas += 1
                 await msg_carregando.edit(
                     embed=embed_erro(
@@ -364,6 +409,18 @@ class PlayerService(PlayerStatus):
                         )
                     )
                     return
+                continue
+
+            playlist_atual, video_atual = self._video_atual_persistido()
+            if not playlist_atual:
+                st.is_playing_voice = False
+                await msg_carregando.edit(embed=embed_aviso('📋 Playlist vazia.'))
+                return
+            if video_atual.get('video_id') != video_id:
+                logger.info(
+                    f'[TOCAR] descartando resultado obsoleto de {video_id}; '
+                    f'faixa atual agora é {video_atual.get("video_id", "")}'
+                )
                 continue
 
             if not audio_path:
@@ -394,6 +451,7 @@ class PlayerService(PlayerStatus):
                     return
                 continue
             falhas_consecutivas = 0
+
             self._current_audio_path = audio_path
             break
 
