@@ -30,6 +30,7 @@ from src.logger import get_logger, setup_logging
 from src.models.player_state import PlayerState
 from src.repositories.config_repository import ConfigRepository
 from src.repositories.playlist_repository import PlaylistRepository
+from src.services.activity_server import ActivityServer
 from src.services.player_service import PlayerService
 from src.services.playlist_service import PlaylistService
 from src.services.spotify_service import SpotifyService
@@ -104,6 +105,14 @@ async def main() -> None:
     proxy = os.getenv('ytdlp_proxy', '').strip() or None
     spotify_client_id = os.getenv('spotify_client_id', '').strip() or None
     spotify_client_secret = os.getenv('spotify_client_secret', '').strip() or None
+    activity_enabled = os.getenv('activity_enabled', 'false').strip().lower() in {
+        '1', 'true', 'yes', 'sim', 'on'
+    }
+    activity_host = os.getenv('activity_host', '0.0.0.0').strip() or '0.0.0.0'
+    try:
+        activity_port = int(os.getenv('activity_port', '8080'))
+    except ValueError:
+        activity_port = 8080
 
     if proxy:
         logger.info(f'[PROXY] usando proxy para yt-dlp: {proxy}')
@@ -172,6 +181,15 @@ async def main() -> None:
     intents = discord.Intents.default()
     intents.message_content = True
     bot = commands.Bot(command_prefix='&', intents=intents, help_command=None)
+    runtime_base = Path(getattr(sys, '_MEIPASS', BASE_DIR))
+    activity_server = ActivityServer(
+        guild_states,
+        guild_services,
+        runtime_base / 'activity' / 'dist',
+        client_id_provider=lambda: str(bot.application_id or ''),
+        host=activity_host,
+        port=activity_port,
+    )
 
     async def _apenas_no_painel(ctx: commands.Context) -> bool:
         """Restringe todos os comandos ao canal definido, exceto o próprio &definircanal."""
@@ -187,14 +205,67 @@ async def main() -> None:
 
     bot.add_check(_apenas_no_painel)
 
-    @bot.event
-    async def on_ready():
-        logger.info(f'Bot conectado como {bot.user} (ID: {bot.user.id})')
+    async def _sincronizar_comandos_slash() -> None:
+        """Sincroniza comandos sem bloquear a restauração do player no on_ready."""
         try:
             synced = await bot.tree.sync()
             logger.info(f'[SLASH] {len(synced)} slash command(s) sincronizados.')
-        except Exception as e:
-            logger.error(f'[SLASH] Erro ao sincronizar slash commands: {e}')
+        except discord.HTTPException as error:
+            if error.code != 50240:
+                logger.error(f'[SLASH] Erro ao sincronizar slash commands: {error}')
+                return
+            try:
+                # Habilitar Activities cria um Entry Point (tipo 4) que versões
+                # atuais do discord.py ainda não representam. O bulk sync comum
+                # tentaria removê-lo; preserve o payload gerenciado pelo Discord.
+                commands = bot.tree._get_all_commands()
+                translator = bot.tree.translator
+                if translator:
+                    payload = [
+                        await command.get_translated_payload(bot.tree, translator)
+                        for command in commands
+                    ]
+                else:
+                    payload = [command.to_dict(bot.tree) for command in commands]
+
+                existing = await bot.tree._http.get_global_commands(bot.application_id)
+                entry_fields = (
+                    'type',
+                    'name',
+                    'description',
+                    'contexts',
+                    'integration_types',
+                    'handler',
+                )
+                entry_points = [
+                    {key: command[key] for key in entry_fields if key in command}
+                    for command in existing
+                    if command.get('type') == 4
+                ]
+                synced = await bot.tree._http.bulk_upsert_global_commands(
+                    bot.application_id,
+                    payload=[*payload, *entry_points],
+                )
+                logger.info(
+                    f'[SLASH] {len(synced)} comando(s) sincronizados '
+                    'preservando o Entry Point da Activity.'
+                )
+            except Exception as fallback_error:
+                logger.error(
+                    '[SLASH] Erro ao preservar o Entry Point durante a '
+                    f'sincronização: {fallback_error}'
+                )
+        except Exception as error:
+            logger.error(f'[SLASH] Erro ao sincronizar slash commands: {error}')
+
+    @bot.event
+    async def on_ready():
+        logger.info(f'Bot conectado como {bot.user} (ID: {bot.user.id})')
+        if not getattr(bot, '_slash_sync_iniciada', False):
+            bot._slash_sync_iniciada = True
+            asyncio.create_task(
+                _sincronizar_comandos_slash(), name='sincronizar-comandos-slash'
+            )
 
         # Carrega estado/configuração de todas as guilds antes de restaurar o painel.
         for guild in bot.guilds:
@@ -334,6 +405,11 @@ async def main() -> None:
         )
     )
 
+    if activity_enabled:
+        await activity_server.start()
+    else:
+        logger.info('[ACTIVITY] desativada (defina activity_enabled=true para habilitar).')
+
     try:
         await bot.start(token)
     except discord.errors.LoginFailure:
@@ -346,6 +422,8 @@ async def main() -> None:
         run_setup(force=False)
         print("\033[1m\033[32m↺ Reiniciando o bot...\033[0m\n")
         os.execv(sys.executable, [sys.executable] + sys.argv)
+    finally:
+        await activity_server.stop()
 
 
 if __name__ == '__main__':

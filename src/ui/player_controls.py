@@ -1,7 +1,9 @@
 """View persistente com botões (emotes) que controlam o player diretamente no painel,
 sem precisar digitar comandos — similar ao que bots como Rythm/Jockie Music oferecem.
 """
+import os
 import unicodedata
+from urllib.parse import urlencode, urlparse
 
 import discord
 
@@ -224,6 +226,84 @@ class PlayerControlView(discord.ui.View):
             state.voice_client.source.volume = state.voice_volume
         await player_svc.persistir_estado()
         await player_svc.atualizar_status_agora(_InteractionCtx(interaction))
+
+    @discord.ui.button(
+        label='Abrir clipe',
+        emoji='🎬',
+        style=discord.ButtonStyle.primary,
+        custom_id='player:activity',
+        row=2,
+    )
+    async def abrir_activity(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        try:
+            await interaction.response.launch_activity()
+        except discord.HTTPException as error:
+            if error.code == 50234:
+                logger.info(
+                    '[ACTIVITY] abertura recusada: a aplicação ainda não possui '
+                    'a flag EMBEDDED no Discord.'
+                )
+                mensagem = (
+                    '⚠️ A sala de clipes ainda não foi habilitada nesta aplicação. '
+                    'No Discord Developer Portal, cadastre primeiro o **URL Mapping** '
+                    'da Activity e depois ative **Activities → Settings → Enable Activities**. '
+                    'Em seguida, reinicie o bot.'
+                )
+            else:
+                logger.warning(f'[ACTIVITY] falha ao abrir pelo painel: {error}')
+                mensagem = (
+                    '❌ Não consegui abrir a sala de clipes agora. '
+                    f'Erro retornado pelo Discord: `{error.code}`.'
+                )
+            if interaction.response.is_done():
+                await interaction.followup.send(mensagem, ephemeral=True)
+            else:
+                await interaction.response.send_message(mensagem, ephemeral=True)
+
+    @discord.ui.button(
+        label='Abrir no navegador',
+        emoji='🌐',
+        style=discord.ButtonStyle.secondary,
+        custom_id='player:activity-browser',
+        row=2,
+    )
+    async def abrir_activity_no_navegador(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        public_url = os.getenv('activity_public_url', '').strip().rstrip('/')
+        parsed_url = urlparse(public_url)
+        if parsed_url.scheme != 'https' or not parsed_url.netloc:
+            await interaction.response.send_message(
+                '❌ O endereço público da sala de clipes não está configurado.',
+                ephemeral=True,
+            )
+            return
+
+        guild_id = interaction.guild_id
+        if guild_id is None:
+            await interaction.response.send_message(
+                '❌ Abra este bot dentro de um servidor do Discord.', ephemeral=True
+            )
+            return
+
+        browser_url = f'{public_url}/?{urlencode({"guild_id": str(guild_id)})}'
+        link_view = discord.ui.View(timeout=300)
+        link_view.add_item(
+            discord.ui.Button(
+                label='Abrir clipe sincronizado',
+                emoji='🌐',
+                style=discord.ButtonStyle.link,
+                url=browser_url,
+            )
+        )
+        await interaction.response.send_message(
+            '🌐 **Android ou tela preta?** Abra a visualização no navegador. '
+            'O vídeo continuará mudo e sincronizado com o áudio da call.',
+            view=link_view,
+            ephemeral=True,
+        )
 
 
 class ConfirmarLimpezaView(discord.ui.View):

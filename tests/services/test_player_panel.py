@@ -1,7 +1,9 @@
 """Regressões de sincronização entre a fila e os controles do player."""
 
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import discord
 import pytest
 
 from src.models.player_state import RepeatMode
@@ -105,6 +107,64 @@ async def test_botao_volume_persiste_preferencia_da_guild(player_service, tmp_pa
     config = player_service.config_repo.load(player_service.state.guild_id)
     assert player_service.state.voice_volume == 0.35
     assert config['player_state']['voice_volume'] == 0.35
+
+
+@pytest.mark.asyncio
+async def test_botao_clipe_lanca_activity_oficial(player_service):
+    interaction = MagicMock()
+    interaction.response.launch_activity = AsyncMock()
+
+    await player_service.view.abrir_activity.callback(interaction)
+
+    interaction.response.launch_activity.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_botao_clipe_explica_quando_app_nao_tem_flag_embedded(player_service):
+    response = MagicMock(status=400, reason='Bad Request')
+    response.headers = {}
+    error = discord.HTTPException(
+        response,
+        {
+            'code': 50234,
+            'message': (
+                'Cannot use this interaction callback if the application '
+                'does not have the EMBEDDED flag'
+            ),
+        },
+    )
+    interaction = MagicMock()
+    interaction.response.launch_activity = AsyncMock(side_effect=error)
+    interaction.response.is_done.return_value = False
+    interaction.response.send_message = AsyncMock()
+
+    await player_service.view.abrir_activity.callback(interaction)
+
+    interaction.response.send_message.assert_awaited_once()
+    mensagem = interaction.response.send_message.await_args.args[0]
+    assert 'URL Mapping' in mensagem
+    assert 'Enable Activities' in mensagem
+    assert interaction.response.send_message.await_args.kwargs['ephemeral'] is True
+
+
+@pytest.mark.asyncio
+async def test_botao_navegador_cria_link_publico_da_guild(player_service):
+    interaction = MagicMock()
+    interaction.guild_id = 675239778483961866
+    interaction.response.send_message = AsyncMock()
+
+    with patch.dict(
+        os.environ,
+        {'activity_public_url': 'https://activity.example.com/'},
+    ):
+        await player_service.view.abrir_activity_no_navegador.callback(interaction)
+
+    interaction.response.send_message.assert_awaited_once()
+    kwargs = interaction.response.send_message.await_args.kwargs
+    assert kwargs['ephemeral'] is True
+    assert kwargs['view'].children[0].url == (
+        'https://activity.example.com/?guild_id=675239778483961866'
+    )
 
 
 def test_falha_de_download_avanca_na_ordem_do_shuffle(player_service):

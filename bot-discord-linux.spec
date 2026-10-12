@@ -6,6 +6,7 @@ datas = []
 binaries = []
 hiddenimports = ['discord', 'discord.opus', 'discord.voice_client', '_cffi_backend', 'yt_dlp', 'spotipy', 'certifi']
 datas += collect_data_files('certifi')
+datas += [('activity/dist', 'activity/dist')]
 tmp_ret = collect_all('yt_dlp')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('nacl')

@@ -9,3 +9,5 @@ services:
       - ./logs:/app/logs
     env_file:
       - config.env
+    ports:
+      - "8080:8080"

@@ -31,6 +31,9 @@ ENV/
 # Distribuicao / build
 dist/
 build/
+!activity/dist/
+!activity/dist/**
+activity/node_modules/
 *.egg-info/
 *.egg
 

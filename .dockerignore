@@ -1,0 +1,14 @@
+.git
+.venv
+build
+dist
+activity/node_modules
+activity/dist
+cache
+data
+logs
+config.env
+config/cookies.txt
+__pycache__
+.pytest_cache
+.ruff_cache

@@ -11,6 +11,7 @@ Bot de música para Discord com reprodução de áudio do YouTube, importação 
 - Pesquisa por texto e adição por URL ou ID.
 - Importação de playlists do YouTube e de faixas, álbuns e playlists do Spotify.
 - Painel persistente com controles de reprodução, volume, shuffle e repetição.
+- Activity de clipes sincronizados, aberta diretamente pelo painel do player.
 - Fila paginada com botões para adicionar, inverter e limpar músicas.
 - Modal para adicionar músicas sem digitar uma mensagem no canal.
 - Estado, configurações e playlist independentes para cada servidor.
@@ -151,6 +152,12 @@ token_discord=SEU_TOKEN_AQUI
 ytdlp_proxy=
 spotify_client_id=
 spotify_client_secret=
+
+# Activity de clipes sincronizados
+activity_enabled=false
+activity_host=0.0.0.0
+activity_port=8080
+activity_public_url=https://activity.seu-dominio.com
 ```
 
 As credenciais do Spotify podem ser criadas no [Spotify for Developers](https://developer.spotify.com/dashboard). Sem elas, somente a integração com Spotify fica indisponível.
@@ -162,6 +169,38 @@ python -m src.setup.cli_setup --force
 ```
 
 > Nunca envie `config.env` ou cookies para o repositório. Ambos podem conter credenciais de acesso.
+
+### Activity de clipes sincronizados
+
+A Activity mostra o vídeo do YouTube atual sem som e usa o áudio reproduzido pelo bot na call. Ela acompanha automaticamente troca de faixa, pausa, retomada, shuffle e posição de reprodução. O painel ganha o botão **🎬 Abrir clipe**.
+
+Para habilitar:
+
+1. Compile o frontend (os binários e a imagem Docker já incluem esta etapa):
+
+   ```bash
+   cd activity
+   npm ci
+   npm run build
+   cd ..
+   ```
+
+2. No `config.env`, defina `activity_enabled=true` e preencha `activity_public_url` com a URL HTTPS pública. Por padrão o servidor escuta na porta `8080`.
+3. Publique essa porta em um endereço **HTTPS** próprio ou por um túnel durante o desenvolvimento.
+4. No Discord Developer Portal, abra a mesma aplicação do bot e, em **Activities → URL Mappings**, configure estes mapeamentos sem incluir `https://` no destino:
+
+   | Prefix | Target |
+   |---|---|
+   | `/` | `activity.seu-dominio.com` |
+   | `/youtube` | `www.youtube.com` |
+   | `/ytimg` | `img.youtube.com` |
+
+5. Somente depois de salvar pelo menos o mapeamento `/`, abra **Activities → Settings** e ative **Enable Activities**. Essa ação concede a flag `EMBEDDED`; o Entry Point `Launch` é criado automaticamente pelo Discord.
+6. Reinicie o bot para que ele reconecte depois da alteração feita no portal.
+
+Depois de reiniciar o bot, pressione **🎬 Abrir clipe** no painel. Em Android ou caso o iframe fique preto, use **🌐 Abrir no navegador**; o bot cria um link privado já associado ao servidor atual. Para testar a interface localmente, abra `http://localhost:8080/?guild_id=ID_DO_SERVIDOR` enquanto o bot estiver em execução.
+
+> O endpoint da Activity é somente leitura, mas revela a faixa atual e as próximas músicas para quem conhecer o ID do servidor. Proteja a origem com HTTPS e não exponha outras portas do host.
 
 ### Cookies do YouTube
 

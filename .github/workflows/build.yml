@@ -30,6 +30,19 @@ jobs:
         with:
           python-version: "3.11"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: activity/package-lock.json
+
+      - name: Compilar Discord Activity
+        shell: bash
+        working-directory: activity
+        run: |
+          npm ci
+          npm run build
+
       - name: Instalar uv
         uses: astral-sh/setup-uv@v5
 
@@ -67,6 +80,7 @@ jobs:
             --collect-all yt_dlp \
             --collect-all nacl \
             --collect-data certifi \
+            --add-data "activity/dist:activity/dist" \
             --add-binary ffmpeg:. \
             main.py
 
@@ -86,6 +100,7 @@ jobs:
             --collect-all yt_dlp `
             --collect-all nacl `
             --collect-data certifi `
+            --add-data "activity/dist;activity/dist" `
             --add-binary "ffmpeg.exe;." `
             main.py
 

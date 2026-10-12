@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#09090c" />
+    <title>Loki Clipes</title>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" role="img"><path d="M6 5v17.2A5.8 5.8 0 1 0 9 27V11l14-3v10.2A5.8 5.8 0 1 0 26 23V2L6 5Z"/></svg>
+          </span>
+          <div>
+            <strong>Loki Clipes</strong>
+            <span>Sala sincronizada</span>
+          </div>
+        </div>
+        <div id="sync-pill" class="sync-pill waiting">
+          <span class="pulse"></span>
+          <span id="sync-label">Conectando</span>
+        </div>
+      </header>
+
+      <section class="content-grid">
+        <article class="player-card">
+          <div class="video-frame" id="video-frame">
+            <div id="youtube-player" class="youtube-player" aria-label="Clipe da música atual"></div>
+            <div id="empty-state" class="empty-state">
+              <div class="disc" aria-hidden="true"><span></span></div>
+              <p id="empty-title">Preparando a sala de clipes</p>
+              <span id="empty-copy">Aguardando o estado do bot…</span>
+            </div>
+            <div class="audio-badge">
+              <span aria-hidden="true">🔇</span> vídeo mudo · áudio pela call
+            </div>
+          </div>
+
+          <div class="track-panel">
+            <div class="track-copy">
+              <span class="eyebrow">TOCANDO AGORA</span>
+              <h1 id="track-title">Nenhuma música tocando</h1>
+              <p id="track-channel">Inicie a reprodução pelo painel do bot.</p>
+            </div>
+            <div class="track-actions">
+              <button id="youtube-button" class="youtube-button" type="button" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.3 3.6-6.3 3.6Z"/></svg>
+                YouTube
+              </button>
+              <button id="resync-button" class="resync-button" type="button" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.1A6 6 0 1 1 16.2 7.8L13 11h7V4l-2.35 2.35Z"/></svg>
+                Sincronizar
+              </button>
+            </div>
+          </div>
+
+          <div class="progress-wrap">
+            <div class="progress-track"><span id="progress-bar"></span></div>
+            <div class="progress-labels">
+              <span id="elapsed">00:00</span>
+              <span id="duration">00:00</span>
+            </div>
+          </div>
+        </article>
+
+        <aside class="queue-card">
+          <div class="queue-heading">
+            <div>
+              <span class="eyebrow">NA SEQUÊNCIA</span>
+              <h2>Próximas faixas</h2>
+            </div>
+            <span id="mode-badge" class="mode-badge">Ordem normal</span>
+          </div>
+          <ol id="queue-list" class="queue-list">
+            <li class="queue-empty">A fila aparecerá aqui.</li>
+          </ol>
+          <footer class="queue-footer">
+            O vídeo acompanha o player automaticamente. Os controles continuam no painel do bot.
+          </footer>
+        </aside>
+      </section>
+
+      <div id="notice" class="notice" role="status" aria-live="polite"></div>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
