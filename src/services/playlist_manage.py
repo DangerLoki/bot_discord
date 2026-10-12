@@ -132,8 +132,15 @@ class PlaylistManage:
     # Promoção
     # ------------------------------------------------------------------
 
-    async def promover_video(self, ctx, entrada: str | None = None, bot=None) -> None:
-        if not entrada:
+    async def promover_video(
+        self,
+        ctx,
+        entrada: str | None = None,
+        bot=None,
+        *,
+        video_id_exato: str | None = None,
+    ) -> None:
+        if not entrada and video_id_exato is None:
             await ctx.send(
                 '❌ Use: `&promover <posição>`, `&promover <video_id>` ou `&promover <nome>`\n'
                 'Exemplos: `&promover 6` | `&promover dQw4w9WgXcQ` | `&promover never gonna`'
@@ -172,7 +179,20 @@ class PlaylistManage:
 
         confirm_msg = None
 
-        if st.shuffle_mode and st.shuffle_playlist:
+        if video_id_exato is not None:
+            index_video = next(
+                (
+                    indice
+                    for indice, item in enumerate(playlist)
+                    if str(item.get('video_id')) == video_id_exato
+                ),
+                None,
+            )
+            if index_video is None:
+                await ctx.send('⚠️ Essa música não está mais na playlist.')
+                return
+            video = playlist[index_video]
+        elif st.shuffle_mode and st.shuffle_playlist:
             if entrada.isdigit():
                 shuffle_pos = int(entrada) - 1
                 if shuffle_pos < 0 or shuffle_pos >= len(st.shuffle_playlist):
@@ -214,6 +234,10 @@ class PlaylistManage:
             await ctx.send('⚠️ Este vídeo já está tocando.')
             return
 
+        # Uma faixa já ouvida também pode ser promovida pelo painel. Ela deixa
+        # de ser considerada concluída para que o auto-avanço realmente a toque.
+        video['tocado'] = False
+
         if st.shuffle_mode and st.shuffle_playlist:
             current_shuffle_pos = next(
                 (i for i, pos in enumerate(st.shuffle_playlist) if pos == index_video), None
@@ -229,7 +253,10 @@ class PlaylistManage:
             nova_pos = next_shuffle_pos + 1
             self.repo.save(self.state.guild_id, playlist)  # garante salvamento também no modo shuffle
         else:
-            next_index = (st.playlist_index + 1) % len(playlist)
+            # Não dá a volta para o início aqui: sem repeat, o auto-avanço
+            # encerra ao chegar ao fim. Ao promover uma faixa anterior, ela
+            # precisa ser movida fisicamente para depois da atual.
+            next_index = st.playlist_index + 1
             if index_video != next_index:
                 playlist.pop(index_video)
                 if index_video < st.playlist_index:

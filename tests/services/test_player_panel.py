@@ -6,6 +6,7 @@ import pytest
 
 from src.models.player_state import RepeatMode
 from src.repositories.config_repository import ConfigRepository
+from src.ui.player_controls import PromoverMusicaView
 from tests.conftest import make_video
 
 
@@ -163,6 +164,125 @@ async def test_promover_no_shuffle_move_musica_para_proxima_posicao(
 
     assert state.shuffle_playlist == [0, 1, 2]
     assert state.shuffle_index == 1
+
+
+@pytest.mark.asyncio
+async def test_promover_musica_ja_tocada_a_deixa_disponivel_novamente(
+    playlist_service, fake_ctx
+):
+    playlist = _playlist()
+    playlist[0]['tocado'] = True
+    playlist_service.repo.save(playlist_service.state.guild_id, playlist)
+    playlist_service.state.playlist_index = 1
+
+    await playlist_service.promover_video(fake_ctx, 'v1')
+
+    fila = playlist_service.repo.load(playlist_service.state.guild_id)
+    assert [video['video_id'] for video in fila] == ['v2', 'v1', 'v3']
+    assert fila[1]['tocado'] is False
+
+
+@pytest.mark.asyncio
+async def test_promocao_visual_trata_id_numerico_como_id_exato(
+    playlist_service, fake_ctx
+):
+    playlist_service.repo.save(
+        playlist_service.state.guild_id,
+        [make_video('atual'), make_video('outra'), make_video('123')],
+    )
+    playlist_service.state.playlist_index = 0
+
+    await playlist_service.promover_video(fake_ctx, video_id_exato='123')
+
+    fila = playlist_service.repo.load(playlist_service.state.guild_id)
+    assert [video['video_id'] for video in fila] == ['atual', '123', 'outra']
+
+
+@pytest.mark.asyncio
+async def test_promover_no_fim_move_escolhida_para_depois_da_atual(
+    playlist_service, fake_ctx
+):
+    playlist = _playlist()
+    playlist[0]['tocado'] = True
+    playlist[1]['tocado'] = True
+    playlist_service.repo.save(playlist_service.state.guild_id, playlist)
+    playlist_service.state.playlist_index = 2
+
+    await playlist_service.promover_video(fake_ctx, 'v1')
+
+    fila = playlist_service.repo.load(playlist_service.state.guild_id)
+    assert [video['video_id'] for video in fila] == ['v2', 'v3', 'v1']
+    assert playlist_service.state.playlist_index == 1
+    assert fila[2]['tocado'] is False
+
+
+def test_menu_promover_pagina_filas_maiores_que_limite_do_discord(playlist_service):
+    playlist = [
+        make_video(f'v{i:02d}', titulo=f'Música {i:02d}') for i in range(31)
+    ]
+    playlist_service.repo.save(playlist_service.state.guild_id, playlist)
+    playlist_service.state.playlist_index = 0
+
+    view = PromoverMusicaView(playlist_service, autor_id=123)
+
+    assert len(view.candidatos) == 30
+    assert len(view.seletor.options) == 25
+    assert view.seletor.options[0].value == 'v01'
+    assert view.pagina_anterior.disabled is True
+    assert view.proxima_pagina.disabled is False
+
+    view.pagina = 1
+    view._sincronizar_componentes()
+
+    assert len(view.seletor.options) == 5
+    assert view.seletor.options[-1].value == 'v30'
+    assert view.pagina_anterior.disabled is False
+    assert view.proxima_pagina.disabled is True
+
+
+def test_menu_promover_exibe_ordem_efetiva_do_shuffle(playlist_service):
+    playlist_service.repo.save(playlist_service.state.guild_id, _playlist())
+    state = playlist_service.state
+    state.shuffle_mode = True
+    state.shuffle_playlist = [2, 0, 1]
+    state.playlist_index = 2
+
+    view = PromoverMusicaView(playlist_service, autor_id=123)
+
+    assert [option.label for option in view.seletor.options] == [
+        '2. Primeira',
+        '3. Segunda',
+    ]
+    assert [option.value for option in view.seletor.options] == ['v1', 'v2']
+
+
+def test_menu_promover_filtra_nome_sem_diferenciar_acentos(playlist_service):
+    playlist_service.repo.save(
+        playlist_service.state.guild_id,
+        [
+            make_video('atual', titulo='Faixa atual'),
+            make_video('v1', titulo='Coração Selvagem'),
+            make_video('v2', titulo='Outra música'),
+        ],
+    )
+    playlist_service.state.playlist_index = 0
+
+    view = PromoverMusicaView(
+        playlist_service, autor_id=123, termo_busca='coracao'
+    )
+
+    assert len(view.candidatos) == 1
+    assert view.seletor.options[0].label == '2. Coração Selvagem'
+    assert view.seletor.options[0].value == 'v1'
+    assert view.mostrar_todas in view.children
+
+
+def test_menu_promover_completo_nao_exibe_botao_ver_todas(playlist_service):
+    playlist_service.repo.save(playlist_service.state.guild_id, _playlist())
+
+    view = PromoverMusicaView(playlist_service, autor_id=123)
+
+    assert view.mostrar_todas not in view.children
 
 
 @pytest.mark.asyncio

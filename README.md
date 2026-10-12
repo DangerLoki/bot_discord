@@ -242,9 +242,9 @@ Os comandos híbridos aceitam o prefixo `&` e também aparecem como slash comman
 
 ## Painel e shuffle
 
-O painel possui controles persistentes para voltar, pausar/retomar, avançar, parar/sair, shuffle, repetição e volume. O botão de parada funciona como um toggle: ele pausa e sai da call; quando acionado novamente, reconecta ao canal do usuário e retoma a faixa.
+O painel possui controles persistentes para voltar, pausar/retomar, avançar, parar/sair, shuffle, repetição e volume. Na fila, o botão **Promover** abre um seletor paginado para escolher visualmente a próxima música ou pesquisá-la pelo nome, sem precisar digitar `&promover`. O botão de parada funciona como um toggle: ele pausa e sai da call; quando acionado novamente, reconecta ao canal do usuário e retoma a faixa.
 
-Na mensagem da fila, os botões permitem navegar pelas páginas, inverter a ordem, abrir o modal de adição e limpar a playlist.
+Na mensagem da fila, os botões permitem navegar pelas páginas, inverter a ordem, promover uma faixa, abrir o modal de adição e limpar a playlist.
 
 Ao ativar o shuffle, o bot cria um `shuffle_id` para a sessão e mantém uma ordem aleatória independente da posição original. Novas músicas entram em uma posição aleatória sem reordenar as demais. A propriedade `tocado` impede repetições no mesmo ciclo.
 

@@ -1,6 +1,8 @@
 """View persistente com botões (emotes) que controlam o player diretamente no painel,
 sem precisar digitar comandos — similar ao que bots como Rythm/Jockie Music oferecem.
 """
+import unicodedata
+
 import discord
 
 from src.logger import get_logger
@@ -264,6 +266,269 @@ class ConfirmarLimpezaView(discord.ui.View):
         self.stop()
 
 
+class PromoverMusicaSelect(discord.ui.Select):
+    """Seletor da faixa que deve se tornar a próxima da fila."""
+
+    def __init__(self, parent: 'PromoverMusicaView') -> None:
+        self.parent_view = parent
+        super().__init__(
+            placeholder='Escolha a música que será a próxima...',
+            min_values=1,
+            max_values=1,
+            options=[],
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.parent_view.promover_selecionada(interaction, self.values[0])
+
+
+class PromoverMusicaView(discord.ui.View):
+    """Menu paginado para promover músicas sem digitar comandos.
+
+    O Discord limita selects a 25 opções. A view pagina a fila inteira e usa o
+    ID do vídeo como valor sempre que possível, evitando selecionar outra faixa
+    caso a fila mude enquanto o menu está aberto.
+    """
+
+    PAGE_SIZE = 25
+
+    def __init__(
+        self,
+        playlist_svc,
+        autor_id: int | None,
+        *,
+        termo_busca: str | None = None,
+    ) -> None:
+        super().__init__(timeout=90)
+        self.playlist_svc = playlist_svc
+        self.autor_id = autor_id
+        self.termo_busca = termo_busca.strip() if termo_busca else None
+        self.pagina = 0
+        candidatos = self._carregar_candidatos()
+        if self.termo_busca:
+            termo_normalizado = self._normalizar_busca(self.termo_busca)
+            candidatos = [
+                candidato
+                for candidato in candidatos
+                if termo_normalizado
+                in self._normalizar_busca(candidato[1].get('titulo') or '')
+            ]
+        self.candidatos = candidatos
+        self.seletor = PromoverMusicaSelect(self)
+        self.add_item(self.seletor)
+        if not self.termo_busca:
+            self.remove_item(self.mostrar_todas)
+        self._sincronizar_componentes()
+
+    def _carregar_candidatos(self) -> list[tuple[int, dict]]:
+        playlist = self.playlist_svc.repo.load(self.playlist_svc.state.guild_id)
+        st = self.playlist_svc.state
+        if st.shuffle_mode and st.shuffle_playlist:
+            ordem = [
+                indice
+                for indice in st.shuffle_playlist
+                if 0 <= indice < len(playlist)
+            ]
+        else:
+            ordem = list(range(len(playlist)))
+
+        return [
+            (posicao, playlist[indice])
+            for posicao, indice in enumerate(ordem, 1)
+            if indice != st.playlist_index
+        ]
+
+    @property
+    def total_paginas(self) -> int:
+        return max(1, (len(self.candidatos) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+
+    @staticmethod
+    def _texto_curto(texto: str, limite: int) -> str:
+        if len(texto) <= limite:
+            return texto
+        return texto[: limite - 1].rstrip() + '…'
+
+    @staticmethod
+    def _normalizar_busca(texto: str) -> str:
+        sem_acentos = ''.join(
+            caractere
+            for caractere in unicodedata.normalize('NFKD', texto)
+            if not unicodedata.combining(caractere)
+        )
+        return sem_acentos.casefold().strip()
+
+    def _opcoes_da_pagina(self) -> list[discord.SelectOption]:
+        inicio = self.pagina * self.PAGE_SIZE
+        fim = inicio + self.PAGE_SIZE
+        opcoes = []
+        for posicao, video in self.candidatos[inicio:fim]:
+            titulo = video.get('titulo') or 'Desconhecido'
+            video_id = video.get('video_id')
+            valor = str(video_id) if video_id else str(posicao)
+            canal = video.get('canal') or 'Canal desconhecido'
+            opcoes.append(
+                discord.SelectOption(
+                    label=self._texto_curto(f'{posicao}. {titulo}', 100),
+                    value=self._texto_curto(valor, 100),
+                    description=self._texto_curto(canal, 100),
+                    emoji='⏫',
+                )
+            )
+        return opcoes
+
+    def _sincronizar_componentes(self) -> None:
+        self.seletor.options = self._opcoes_da_pagina()
+        self.seletor.placeholder = (
+            f'Escolha a próxima música · página {self.pagina + 1}/{self.total_paginas}'
+        )
+        self.pagina_anterior.disabled = self.pagina == 0
+        self.proxima_pagina.disabled = self.pagina >= self.total_paginas - 1
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if self.autor_id is None or interaction.user.id == self.autor_id:
+            return True
+        await interaction.response.send_message(
+            '❌ Abra o seu próprio menu de promoção para escolher uma música.',
+            ephemeral=True,
+        )
+        return False
+
+    async def promover_selecionada(
+        self, interaction: discord.Interaction, entrada: str
+    ) -> None:
+        await interaction.response.defer()
+        video_id_exato = next(
+            (
+                str(video.get('video_id'))
+                for _, video in self.candidatos
+                if video.get('video_id') is not None
+                and str(video.get('video_id')) == entrada
+            ),
+            None,
+        )
+        await self.playlist_svc.promover_video(
+            _InteractionCtx(interaction),
+            entrada if video_id_exato is None else None,
+            interaction.client,
+            video_id_exato=video_id_exato,
+        )
+        await interaction.edit_original_response(
+            content='✅ Seleção processada. A fila foi atualizada.', view=None
+        )
+        self.stop()
+
+    @discord.ui.button(
+        label='Anterior', emoji='◀️', style=discord.ButtonStyle.secondary, row=1
+    )
+    async def pagina_anterior(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        self.pagina = max(0, self.pagina - 1)
+        self._sincronizar_componentes()
+        await interaction.response.edit_message(view=self)
+
+    @discord.ui.button(
+        label='Próxima', emoji='▶️', style=discord.ButtonStyle.secondary, row=1
+    )
+    async def proxima_pagina(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        self.pagina = min(self.total_paginas - 1, self.pagina + 1)
+        self._sincronizar_componentes()
+        await interaction.response.edit_message(view=self)
+
+    @discord.ui.button(
+        label='Buscar por nome',
+        emoji='🔍',
+        style=discord.ButtonStyle.primary,
+        row=1,
+    )
+    async def buscar_por_nome(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await interaction.response.send_modal(
+            BuscarPromocaoModal(self.playlist_svc, self.autor_id, self)
+        )
+
+    @discord.ui.button(
+        label='Ver todas',
+        emoji='📋',
+        style=discord.ButtonStyle.secondary,
+        row=1,
+    )
+    async def mostrar_todas(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        view = PromoverMusicaView(self.playlist_svc, self.autor_id)
+        await interaction.response.edit_message(
+            content='Escolha a música que deve tocar em seguida:', view=view
+        )
+        self.stop()
+
+
+class BuscarPromocaoModal(discord.ui.Modal, title='Buscar música na fila'):
+    """Pesquisa músicas e devolve os resultados no seletor de promoção."""
+
+    consulta = discord.ui.TextInput(
+        label='Nome da música',
+        placeholder='Digite parte do nome da música...',
+        required=True,
+        min_length=2,
+        max_length=100,
+    )
+
+    def __init__(self, playlist_svc, autor_id: int | None, view_origem) -> None:
+        super().__init__()
+        self.playlist_svc = playlist_svc
+        self.autor_id = autor_id
+        self.view_origem = view_origem
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        termo = self.consulta.value.strip()
+        if len(termo) < 2:
+            await interaction.response.edit_message(
+                content='⚠️ Digite pelo menos 2 caracteres para pesquisar.',
+                view=self.view_origem,
+            )
+            return
+        view = PromoverMusicaView(
+            self.playlist_svc,
+            self.autor_id,
+            termo_busca=termo,
+        )
+        if not view.candidatos:
+            await interaction.response.edit_message(
+                content=(
+                    f'⚠️ Nenhuma música encontrada para **{termo}**. '
+                    'Tente buscar outro nome.'
+                ),
+                view=self.view_origem,
+            )
+            return
+        await interaction.response.edit_message(
+            content=(
+                f'🔍 **{len(view.candidatos)}** resultado(s) para '
+                f'**{termo}**. Escolha a próxima música:'
+            ),
+            view=view,
+        )
+        self.view_origem.stop()
+
+    async def on_error(
+        self, interaction: discord.Interaction, error: Exception
+    ) -> None:
+        logger.error(f'[PROMOTE SEARCH] erro ao pesquisar: {error}', exc_info=error)
+        if interaction.response.is_done():
+            await interaction.followup.send(
+                '❌ Não foi possível pesquisar a fila. Tente novamente.', ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                '❌ Não foi possível pesquisar a fila. Tente novamente.', ephemeral=True
+            )
+
+
 class PlaylistQueueView(discord.ui.View):
     """Botões persistentes anexados à mensagem da fila de reprodução."""
 
@@ -318,6 +583,27 @@ class PlaylistQueueView(discord.ui.View):
         # Não usa _ack aqui: abrir um modal precisa ser a resposta inicial da interação.
         _, _, playlist_svc = self._services_for(interaction)
         await interaction.response.send_modal(AdicionarMusicaModal(playlist_svc))
+
+    @discord.ui.button(
+        label='Promover',
+        emoji='⏫',
+        style=discord.ButtonStyle.primary,
+        custom_id='playlist:promote',
+        row=1,
+    )
+    async def promover(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        _, _, playlist_svc = self._services_for(interaction)
+        view = PromoverMusicaView(playlist_svc, interaction.user.id)
+        if not view.candidatos:
+            await interaction.response.send_message(
+                '⚠️ Não há outra música na fila para promover.', ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            'Escolha a música que deve tocar em seguida:',
+            ephemeral=True,
+            view=view,
+        )
 
     @discord.ui.button(emoji='🗑️', style=discord.ButtonStyle.danger, custom_id='playlist:clear', row=1)
     async def limpar_playlist(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
