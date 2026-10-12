@@ -4,6 +4,7 @@ import './styles.css';
 const elements = {
   syncPill: document.querySelector('#sync-pill'),
   syncLabel: document.querySelector('#sync-label'),
+  videoFrame: document.querySelector('#video-frame'),
   player: document.querySelector('#youtube-player'),
   empty: document.querySelector('#empty-state'),
   emptyTitle: document.querySelector('#empty-title'),
@@ -17,6 +18,7 @@ const elements = {
   mode: document.querySelector('#mode-badge'),
   resync: document.querySelector('#resync-button'),
   youtube: document.querySelector('#youtube-button'),
+  fullscreen: document.querySelector('#fullscreen-button'),
   notice: document.querySelector('#notice'),
 };
 
@@ -46,6 +48,7 @@ function youtubeEmbedUrl(videoId, startAt) {
     autoplay: '1',
     mute: '1',
     controls: '1',
+    fs: '0',
     playsinline: '1',
     enablejsapi: '1',
     rel: '0',
@@ -110,7 +113,6 @@ function mountVideo(videoId, position, status) {
   iframe.src = youtubeEmbedUrl(videoId, position);
   iframe.allow = 'autoplay; encrypted-media; picture-in-picture';
   iframe.referrerPolicy = 'strict-origin-when-cross-origin';
-  iframe.allowFullscreen = true;
   iframe.addEventListener('load', () => {
     const announcePlayer = () => {
       iframe.contentWindow?.postMessage(JSON.stringify({ event: 'listening' }), '*');
@@ -169,6 +171,64 @@ function flashNotice(message) {
   elements.notice.classList.add('visible');
   window.clearTimeout(flashNotice.timeout);
   flashNotice.timeout = window.setTimeout(() => elements.notice.classList.remove('visible'), 2600);
+}
+
+function nativeFullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function isVideoFullscreen() {
+  return nativeFullscreenElement() === elements.videoFrame
+    || elements.videoFrame.classList.contains('fullscreen-fallback');
+}
+
+function updateFullscreenButton() {
+  const active = isVideoFullscreen();
+  elements.fullscreen.setAttribute('aria-pressed', String(active));
+  elements.fullscreen.setAttribute(
+    'aria-label',
+    active ? 'Sair da tela cheia' : 'Colocar o vídeo em tela cheia',
+  );
+  elements.fullscreen.title = active ? 'Sair da tela cheia' : 'Tela cheia';
+}
+
+function enterFallbackFullscreen() {
+  elements.videoFrame.classList.add('fullscreen-fallback');
+  document.body.classList.add('video-fullscreen-fallback');
+  updateFullscreenButton();
+}
+
+function exitFallbackFullscreen() {
+  elements.videoFrame.classList.remove('fullscreen-fallback');
+  document.body.classList.remove('video-fullscreen-fallback');
+  updateFullscreenButton();
+}
+
+async function toggleVideoFullscreen() {
+  if (elements.videoFrame.classList.contains('fullscreen-fallback')) {
+    exitFallbackFullscreen();
+    return;
+  }
+
+  if (nativeFullscreenElement() === elements.videoFrame) {
+    const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exitFullscreen) await exitFullscreen.call(document);
+    return;
+  }
+
+  const requestFullscreen = elements.videoFrame.requestFullscreen
+    || elements.videoFrame.webkitRequestFullscreen;
+  if (!requestFullscreen) {
+    enterFallbackFullscreen();
+    return;
+  }
+
+  try {
+    await requestFullscreen.call(elements.videoFrame);
+  } catch (error) {
+    console.warn('Tela cheia nativa indisponível; usando modo expandido.', error);
+    enterFallbackFullscreen();
+  }
 }
 
 function renderQueue(queue) {
@@ -343,6 +403,7 @@ window.addEventListener('message', (event) => {
 });
 
 elements.resync.addEventListener('click', hardSync);
+elements.fullscreen.addEventListener('click', toggleVideoFullscreen);
 elements.youtube.addEventListener('click', async () => {
   const url = runtime.snapshot?.video?.url;
   if (!url) return;
@@ -355,6 +416,13 @@ elements.youtube.addEventListener('click', async () => {
   } catch (error) {
     console.error(error);
     flashNotice('Não foi possível abrir o YouTube neste dispositivo.');
+  }
+});
+document.addEventListener('fullscreenchange', updateFullscreenButton);
+document.addEventListener('webkitfullscreenchange', updateFullscreenButton);
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && elements.videoFrame.classList.contains('fullscreen-fallback')) {
+    exitFallbackFullscreen();
   }
 });
 window.setInterval(updateProgress, 500);

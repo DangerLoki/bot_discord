@@ -48,7 +48,7 @@ class ActivityServer:
         return 'loading' if state.is_playing_voice else 'idle'
 
     @staticmethod
-    def _proximas_faixas(state, playlist: list, limite: int = 5) -> list[dict]:
+    def _proximas_faixas(state, playlist: list, limite: int = 10) -> list[dict]:
         if state.shuffle_mode and state.shuffle_playlist:
             indices = state.shuffle_playlist[state.shuffle_index :]
         else:
