@@ -2,6 +2,7 @@
 
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import parse_qs, urlparse
 
 import discord
 import pytest
@@ -151,6 +152,7 @@ async def test_botao_clipe_explica_quando_app_nao_tem_flag_embedded(player_servi
 async def test_botao_navegador_cria_link_publico_da_guild(player_service):
     interaction = MagicMock()
     interaction.guild_id = 675239778483961866
+    interaction.user.id = 998877665544332211
     interaction.response.send_message = AsyncMock()
 
     with patch.dict(
@@ -162,9 +164,11 @@ async def test_botao_navegador_cria_link_publico_da_guild(player_service):
     interaction.response.send_message.assert_awaited_once()
     kwargs = interaction.response.send_message.await_args.kwargs
     assert kwargs['ephemeral'] is True
-    assert kwargs['view'].children[0].url == (
-        'https://activity.example.com/?guild_id=675239778483961866'
-    )
+    parsed = urlparse(kwargs['view'].children[0].url)
+    query = parse_qs(parsed.query)
+    assert f'{parsed.scheme}://{parsed.netloc}{parsed.path}' == 'https://activity.example.com/'
+    assert query['guild_id'] == ['675239778483961866']
+    assert query['control_token'][0].startswith('998877665544332211.')
 
 
 def test_falha_de_download_avanca_na_ordem_do_shuffle(player_service):

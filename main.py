@@ -187,6 +187,7 @@ async def main() -> None:
         guild_services,
         runtime_base / 'activity' / 'dist',
         client_id_provider=lambda: str(bot.application_id or ''),
+        bot_provider=lambda: bot,
         host=activity_host,
         port=activity_port,
     )

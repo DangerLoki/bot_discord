@@ -16,6 +16,20 @@ const elements = {
   duration: document.querySelector('#duration'),
   queue: document.querySelector('#queue-list'),
   mode: document.querySelector('#mode-badge'),
+  controlDeck: document.querySelector('#control-deck'),
+  controlAuthNotice: document.querySelector('#control-auth-notice'),
+  playPause: document.querySelector('#play-pause-control'),
+  playPauseIcon: document.querySelector('#play-pause-icon'),
+  playPauseLabel: document.querySelector('#play-pause-label'),
+  stopControl: document.querySelector('#stop-control'),
+  shuffleControl: document.querySelector('#shuffle-control'),
+  repeatControl: document.querySelector('#repeat-control'),
+  volumeControl: document.querySelector('#volume-control'),
+  volumeLabel: document.querySelector('#volume-label'),
+  addForm: document.querySelector('#add-form'),
+  addQuery: document.querySelector('#add-query'),
+  addSubmit: document.querySelector('#add-submit'),
+  searchResults: document.querySelector('#search-results'),
   resync: document.querySelector('#resync-button'),
   youtube: document.querySelector('#youtube-button'),
   fullscreen: document.querySelector('#fullscreen-button'),
@@ -26,6 +40,7 @@ const runtime = {
   embedded: new URLSearchParams(window.location.search).has('frame_id'),
   discord: null,
   guildId: new URLSearchParams(window.location.search).get('guild_id'),
+  controlToken: new URLSearchParams(window.location.search).get('control_token'),
   config: null,
   snapshot: null,
   iframe: null,
@@ -37,10 +52,19 @@ const runtime = {
   fetchedAt: 0,
   lastHardSyncAt: 0,
   timer: null,
+  controlBusy: false,
+  searchController: null,
 };
 
 function apiPath(path) {
   return `${runtime.embedded ? '/.proxy' : ''}${path}`;
+}
+
+function apiHeaders(extra = {}) {
+  return {
+    ...extra,
+    ...(runtime.controlToken ? { 'X-Loki-Control': runtime.controlToken } : {}),
+  };
 }
 
 function youtubeEmbedUrl(videoId, startAt) {
@@ -254,6 +278,7 @@ function renderQueue(queue) {
     image.loading = 'lazy';
 
     const copy = document.createElement('div');
+    copy.className = 'queue-copy';
     const title = document.createElement('strong');
     title.textContent = track.title;
     const channel = document.createElement('span');
@@ -262,8 +287,62 @@ function renderQueue(queue) {
 
     const duration = document.createElement('time');
     duration.textContent = formatTime(track.duration_seconds);
-    item.append(position, image, copy, duration);
+
+    const actions = document.createElement('div');
+    actions.className = 'queue-actions';
+    const promote = document.createElement('button');
+    promote.type = 'button';
+    promote.className = 'queue-action promote-action';
+    promote.title = 'Tocar em seguida';
+    promote.setAttribute('aria-label', `Tocar ${track.title} em seguida`);
+    promote.textContent = '⏫';
+    promote.addEventListener('click', () => controlRequest('promote', { video_id: track.video_id }));
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'queue-action remove-action';
+    remove.title = 'Remover da fila';
+    remove.setAttribute('aria-label', `Remover ${track.title} da fila`);
+    remove.textContent = '×';
+    remove.addEventListener('click', () => controlRequest('remove', { video_id: track.video_id }));
+    actions.append(promote, remove);
+
+    const meta = document.createElement('div');
+    meta.className = 'queue-meta';
+    meta.append(duration, actions);
+    item.append(position, image, copy, meta);
     elements.queue.append(item);
+  });
+}
+
+function renderControls(snapshot) {
+  const { playback, modes, controls } = snapshot;
+  const authorized = Boolean(controls?.authorized);
+  elements.controlDeck.classList.toggle('read-only', !authorized);
+  elements.controlAuthNotice.hidden = authorized;
+  document.querySelectorAll('[data-control], [data-control-input]').forEach((control) => {
+    control.disabled = !authorized || runtime.controlBusy;
+  });
+
+  const playing = playback.status === 'playing';
+  elements.playPauseIcon.textContent = playing ? '⏸' : '▶';
+  elements.playPauseLabel.textContent = playing ? 'Pausar' : 'Tocar';
+  elements.stopControl.disabled = !authorized || runtime.controlBusy || !controls?.connected;
+  elements.shuffleControl.classList.toggle('active', Boolean(modes.shuffle));
+
+  const repeatLabels = {
+    off: 'Repetir: desligado',
+    one: 'Repetir: esta faixa',
+    all: 'Repetir: todas',
+  };
+  elements.repeatControl.classList.toggle('active', modes.repeat !== 'off');
+  elements.repeatControl.lastChild.textContent = ` ${repeatLabels[modes.repeat] || repeatLabels.off}`;
+
+  const volume = Number(controls?.volume_percent ?? 25);
+  if (document.activeElement !== elements.volumeControl) elements.volumeControl.value = volume;
+  elements.volumeLabel.value = `${volume}%`;
+  elements.volumeLabel.textContent = `${volume}%`;
+  elements.queue.querySelectorAll('button').forEach((button) => {
+    button.disabled = !authorized || runtime.controlBusy;
   });
 }
 
@@ -306,6 +385,7 @@ function render(snapshot) {
   elements.mode.textContent = modes.shuffle ? 'Shuffle ligado' : 'Ordem normal';
   elements.mode.classList.toggle('active', modes.shuffle);
   renderQueue(queue);
+  renderControls(snapshot);
   updateProgress();
 }
 
@@ -322,10 +402,116 @@ async function fetchSnapshot() {
   if (!runtime.guildId) return;
   const response = await fetch(
     `${apiPath('/api/state')}?guild_id=${encodeURIComponent(runtime.guildId)}`,
-    { cache: 'no-store' },
+    { cache: 'no-store', headers: apiHeaders() },
   );
   if (!response.ok) throw new Error(`Estado indisponível (${response.status})`);
   render(await response.json());
+}
+
+async function responsePayload(response) {
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) return response.json();
+  return { error: await response.text() };
+}
+
+async function controlRequest(action, payload = {}) {
+  if (!runtime.controlToken || runtime.controlBusy) {
+    if (!runtime.controlToken) flashNotice('Abra o painel pelo botão do bot para controlar a sala.');
+    return false;
+  }
+  runtime.controlBusy = true;
+  if (runtime.snapshot) renderControls(runtime.snapshot);
+  try {
+    const response = await fetch(
+      `${apiPath('/api/control')}?guild_id=${encodeURIComponent(runtime.guildId)}`,
+      {
+        method: 'POST',
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ action, ...payload }),
+      },
+    );
+    const data = await responsePayload(response);
+    if (!response.ok) throw new Error(data.error || 'Não foi possível executar o comando.');
+    if (data.state) render(data.state);
+    flashNotice(data.message || 'Comando executado.');
+    return true;
+  } catch (error) {
+    console.error(error);
+    flashNotice(error.message || 'Não foi possível executar o comando.');
+    return false;
+  } finally {
+    runtime.controlBusy = false;
+    if (runtime.snapshot) renderControls(runtime.snapshot);
+  }
+}
+
+function youtubeVideoId(value) {
+  const trimmed = value.trim();
+  if (/^[A-Za-z0-9_-]{11}$/.test(trimmed)) return trimmed;
+  try {
+    const url = new URL(trimmed);
+    if (url.hostname === 'youtu.be') return url.pathname.split('/').filter(Boolean)[0] || null;
+    if (url.hostname.endsWith('youtube.com')) {
+      return url.searchParams.get('v') || url.pathname.match(/\/(?:shorts|embed)\/([A-Za-z0-9_-]{11})/)?.[1] || null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function renderSearchResults(results) {
+  elements.searchResults.replaceChildren();
+  elements.searchResults.hidden = false;
+  if (!results.length) {
+    elements.searchResults.textContent = 'Nenhum resultado encontrado.';
+    return;
+  }
+  results.forEach((result) => {
+    const item = document.createElement('article');
+    item.className = 'search-result';
+    const image = document.createElement('img');
+    image.src = result.thumbnail_url;
+    image.alt = '';
+    const copy = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = result.title;
+    const detail = document.createElement('span');
+    detail.textContent = [result.channel, result.duration].filter(Boolean).join(' · ');
+    copy.append(title, detail);
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.textContent = 'Adicionar';
+    add.addEventListener('click', async () => {
+      if (await controlRequest('add', { video_id: result.video_id })) {
+        elements.searchResults.hidden = true;
+        elements.addQuery.value = '';
+      }
+    });
+    item.append(image, copy, add);
+    elements.searchResults.append(item);
+  });
+}
+
+async function searchSongs(query) {
+  runtime.searchController?.abort();
+  runtime.searchController = new AbortController();
+  elements.addSubmit.disabled = true;
+  elements.addSubmit.textContent = 'Buscando…';
+  try {
+    const response = await fetch(
+      `${apiPath('/api/search')}?guild_id=${encodeURIComponent(runtime.guildId)}&q=${encodeURIComponent(query)}`,
+      { headers: apiHeaders(), signal: runtime.searchController.signal },
+    );
+    const data = await responsePayload(response);
+    if (!response.ok) throw new Error(data.error || 'Não foi possível pesquisar.');
+    renderSearchResults(data.results || []);
+  } catch (error) {
+    if (error.name !== 'AbortError') flashNotice(error.message || 'Não foi possível pesquisar.');
+  } finally {
+    elements.addSubmit.textContent = '＋ Adicionar';
+    elements.addSubmit.disabled = !runtime.controlToken;
+  }
 }
 
 async function initialize() {
@@ -404,6 +590,31 @@ window.addEventListener('message', (event) => {
 
 elements.resync.addEventListener('click', hardSync);
 elements.fullscreen.addEventListener('click', toggleVideoFullscreen);
+document.querySelectorAll('[data-control]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const action = button.dataset.control;
+    if (action === 'clear' && !window.confirm('Remover todas as músicas da fila?')) return;
+    controlRequest(action);
+  });
+});
+elements.volumeControl.addEventListener('input', () => {
+  elements.volumeLabel.value = `${elements.volumeControl.value}%`;
+  elements.volumeLabel.textContent = `${elements.volumeControl.value}%`;
+});
+elements.volumeControl.addEventListener('change', () => {
+  controlRequest('volume', { value: elements.volumeControl.value });
+});
+elements.addForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const query = elements.addQuery.value.trim();
+  if (query.length < 2) {
+    flashNotice('Digite o nome ou cole um link do YouTube.');
+    return;
+  }
+  const videoId = youtubeVideoId(query);
+  if (videoId) controlRequest('add', { video_id: videoId });
+  else searchSongs(query);
+});
 elements.youtube.addEventListener('click', async () => {
   const url = runtime.snapshot?.video?.url;
   if (!url) return;

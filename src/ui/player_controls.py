@@ -9,6 +9,7 @@ import discord
 
 from src.logger import get_logger
 from src.models.player_state import RepeatMode
+from src.services.activity_server import create_activity_control_token
 
 logger = get_logger(__name__)
 
@@ -288,7 +289,11 @@ class PlayerControlView(discord.ui.View):
             )
             return
 
-        browser_url = f'{public_url}/?{urlencode({"guild_id": str(guild_id)})}'
+        control_token = create_activity_control_token(guild_id, interaction.user.id)
+        query = urlencode(
+            {'guild_id': str(guild_id), 'control_token': control_token}
+        )
+        browser_url = f'{public_url}/?{query}'
         link_view = discord.ui.View(timeout=300)
         link_view.add_item(
             discord.ui.Button(
@@ -300,7 +305,8 @@ class PlayerControlView(discord.ui.View):
         )
         await interaction.response.send_message(
             '🌐 **Android ou tela preta?** Abra a visualização no navegador. '
-            'O vídeo continuará mudo e sincronizado com o áudio da call.',
+            'O vídeo continuará mudo e sincronizado com o áudio da call. '
+            'Os controles do player também estarão disponíveis na página.',
             view=link_view,
             ephemeral=True,
         )

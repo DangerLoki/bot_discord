@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#09090c" />
     <title>Loki Clipes</title>
-    <script type="module" crossorigin src="./assets/index-2gxKJw4b.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-BGrmcoa5.css">
+    <script type="module" crossorigin src="./assets/index-BMY3S26I.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-nTMFQcox.css">
   </head>
   <body>
     <main class="shell">
@@ -73,6 +73,42 @@
             </div>
           </div>
 
+          <section id="control-deck" class="control-deck" aria-label="Controles do player">
+            <p id="control-auth-notice" class="control-auth-notice" hidden>
+              Abra esta página pelo botão <strong>Abrir no navegador</strong> do bot para habilitar os controles.
+            </p>
+            <div class="transport-controls">
+              <button class="control-button" type="button" data-control="previous" title="Faixa anterior">
+                <span aria-hidden="true">⏮</span><small>Anterior</small>
+              </button>
+              <button id="play-pause-control" class="control-button control-button-primary" type="button" data-control="play_pause" title="Pausar ou continuar">
+                <span id="play-pause-icon" aria-hidden="true">▶</span><small id="play-pause-label">Tocar</small>
+              </button>
+              <button class="control-button" type="button" data-control="next" title="Próxima faixa">
+                <span aria-hidden="true">⏭</span><small>Próxima</small>
+              </button>
+              <button id="stop-control" class="control-button control-button-danger" type="button" data-control="stop" title="Pausar e retirar o bot da call">
+                <span aria-hidden="true">⏹</span><small>Sair da call</small>
+              </button>
+            </div>
+            <div class="playback-options">
+              <button id="shuffle-control" class="option-button" type="button" data-control="shuffle">
+                <span aria-hidden="true">🔀</span> Shuffle
+              </button>
+              <button id="repeat-control" class="option-button" type="button" data-control="repeat">
+                <span aria-hidden="true">🔁</span> Repetir: desligado
+              </button>
+              <button class="option-button" type="button" data-control="reverse">
+                <span aria-hidden="true">🔃</span> Inverter próximas
+              </button>
+              <label class="volume-control" for="volume-control">
+                <span aria-hidden="true">🔊</span>
+                <input id="volume-control" type="range" min="0" max="200" step="5" value="25" data-control-input />
+                <output id="volume-label" for="volume-control">25%</output>
+              </label>
+            </div>
+          </section>
+
           <div class="progress-wrap">
             <div class="progress-track"><span id="progress-bar"></span></div>
             <div class="progress-labels">
@@ -90,11 +126,29 @@
             </div>
             <span id="mode-badge" class="mode-badge">Ordem normal</span>
           </div>
+          <form id="add-form" class="add-form" role="search">
+            <label class="sr-only" for="add-query">Adicionar música</label>
+            <input
+              id="add-query"
+              type="search"
+              maxlength="500"
+              autocomplete="off"
+              placeholder="Nome da música ou link do YouTube"
+              data-control-input
+            />
+            <button id="add-submit" type="submit" data-control-input>
+              <span aria-hidden="true">＋</span> Adicionar
+            </button>
+          </form>
+          <div id="search-results" class="search-results" hidden></div>
           <ol id="queue-list" class="queue-list">
             <li class="queue-empty">A fila aparecerá aqui.</li>
           </ol>
           <footer class="queue-footer">
-            O vídeo acompanha o player automaticamente. Os controles continuam no painel do bot.
+            <span>O vídeo acompanha o player automaticamente.</span>
+            <button id="clear-queue-control" class="clear-queue-button" type="button" data-control="clear">
+              🗑️ Limpar fila
+            </button>
           </footer>
         </aside>
       </section>
